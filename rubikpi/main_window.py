@@ -333,21 +333,27 @@ class MainWindow(QMainWindow):
         if self.solution is None or self.progress >= len(self.solution.moves):
             return
         move = self.solution.moves[self.progress]
+        before = self.cube.copy()
         self.cube.apply(move)
         self.progress += 1
         self._sync_views(highlight_move=move)
+        self.view.animate_move(before, move)
 
     def step_back(self) -> None:
         if self.solution is None or self.progress == 0:
             return
         self.progress -= 1
         move = self.solution.moves[self.progress]
-        self.cube.apply_sequence(invert_sequence([move]))
+        undo = invert_sequence([move])[0]
+        before = self.cube.copy()
+        self.cube.apply(undo)
         self._sync_views(highlight_move=move + " (undone)")
+        self.view.animate_move(before, undo)
 
     def jump_to(self, target: int) -> None:
         if self.solution is None:
             return
+        self.view.stop_animation()  # jumping is not a turn to watch
         target = max(0, min(target, len(self.solution.moves)))
         while self.progress < target:
             self.cube.apply(self.solution.moves[self.progress])
@@ -393,6 +399,9 @@ class MainWindow(QMainWindow):
         match = best_match(self.cube, faces)
         if not match.confident:
             return
+        # The centre stickers identify each visible face, so the camera's
+        # own view tells us which side it is on — no need to be told.
+        self._sync_camera_face(match.orientation)
 
         if match.move == "":
             # Nothing turned — but the cube may have been rotated.
@@ -429,6 +438,22 @@ class MainWindow(QMainWindow):
         self._follow_orient = match.orientation
         self._accept_user_move(match.move)
 
+    def _sync_camera_face(self, orientation: int) -> None:
+        """Point the "Camera sees" setting at whatever the camera really sees.
+
+        Read straight off the centre pieces: the tracker's orientation
+        says which face is towards the camera, so left and right stay
+        correct even if the user turns the cube right round.
+        """
+        face = facing_face(orientation)
+        index = self.camera_face.findData(face)
+        if index < 0 or index == self.camera_face.currentIndex():
+            return  # a top/bottom view, or already right
+        self.camera_face.blockSignals(True)   # no status spam, no recursion
+        self.camera_face.setCurrentIndex(index)
+        self.camera_face.blockSignals(False)
+        self.tree_panel.set_holding(self.holding())
+
     def _colour_at_camera(self, orientation: int) -> str:
         """Colour of the side pointing at the camera in that orientation."""
         return COLOR_NAME[self.cube.center(facing_face(orientation))]
@@ -438,11 +463,13 @@ class MainWindow(QMainWindow):
         expected = (self.solution.moves[self.progress]
                     if self.solution and self.progress < len(self.solution.moves)
                     else "")
+        before = self.cube.copy()
         self.cube.apply(move)
         if move == expected:
             self.progress += 1
             done = self.progress >= len(self.solution.moves)
             self._sync_views(highlight_move=move)
+            self.view.animate_move(before, move)
             if done:
                 self._say("🎉 That was the last move — solved!")
             else:

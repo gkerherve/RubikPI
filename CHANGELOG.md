@@ -2,7 +2,28 @@
 
 All notable changes to RubikPI.
 
-## 0.8.0 — 2026-08-01
+## 0.9.0 — 2026-08-01
+
+You can watch the turns happen, and the camera works out its own side.
+
+- **The cube is now drawn as 27 cubies in 3D** (new `cube3d` module,
+  painter's algorithm, back-face removal) instead of three flat faces.
+  That means **turns are animated properly**: the whole layer rotates,
+  carrying the stickers on its sides with it, exactly like a real cube.
+  A curved arrow shows the direction, and the motion eases in and out.
+- Stepping forward, stepping back and follow-along moves all animate;
+  jumping to a step does not (it is not a turn to watch).
+- **The 3D view is anchored to colours**: the blue centre always faces
+  you and the yellow centre is always on top, whatever rotations a
+  solution contains, so the picture never spins under you.
+- **The camera works out which side it is on by itself**, from the centre
+  pieces it can see: hold the cube any way round and the "Camera sees"
+  setting follows, keeping "on your right" honest. You can still set it
+  by hand when the camera is off.
+- The animation geometry is verified against the move engine rather than
+  eyeballed: every cubie rotation must reproduce the model's own result,
+  and the finished animation was checked pixel-for-pixel against the
+  moved cube for all 12 move types.
 
 RubikPI now knows which side of the cube the camera is on.
 

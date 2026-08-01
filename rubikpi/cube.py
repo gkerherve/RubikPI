@@ -393,6 +393,29 @@ def possible_schemes() -> list[dict[str, str]]:
     return out
 
 
+def orientation_for_colors(cube: "Cube", top: str, front: str) -> str | None:
+    """Rotation putting the *top* colour up and the *front* colour forward.
+
+    Lets a view stay anchored to colours rather than to internal face
+    names: whatever rotations a solution contains, the picture keeps the
+    same side towards the viewer.  Returns None if the cube does not have
+    those centre colours (e.g. it is not scanned yet).
+    """
+    for seq in _ORIENTATIONS:
+        probe = cube.copy()
+        probe.apply_sequence(seq)
+        if probe.center("U") == top and probe.center("F") == front:
+            return seq
+    return None
+
+
+def position_of_faces(seq: str) -> dict[str, str]:
+    """model face -> position it occupies after the rotation *seq*."""
+    label = Cube(faces={f: [f] * 9 for f in FACES})
+    label.apply_sequence(seq)
+    return {label.center(pos): pos for pos in FACES}
+
+
 def held_faces(front: str, up: str) -> dict[str, str]:
     """Which face sits at each position when the cube is held a given way.
 

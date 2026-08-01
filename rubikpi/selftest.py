@@ -17,6 +17,8 @@ import random
 from rubikpi.cube import (
     ALL_MOVES,
     BEGINNER_STAGES,
+    DEFAULT_SCHEME,
+    FACES,
     Cube,
     cross_done,
     first_layer_done,
@@ -148,7 +150,7 @@ def main() -> int:
                     not swapped.is_solvable()[0])
 
     # Colour scheme: one source of truth, and mirror schemes rejected.
-    from rubikpi.cube import DEFAULT_SCHEME, scheme_is_possible
+    from rubikpi.cube import scheme_is_possible
     from rubikpi.vision import EXPECTED_CENTER
 
     all_ok &= check("the cube's colour scheme is physically possible",
@@ -166,8 +168,61 @@ def main() -> int:
     all_ok &= check("a cube with swapped red/orange centres is rejected",
                     not mixed.is_solvable()[0])
 
+    # 3D geometry: turning a layer of cubies must reproduce the move
+    # engine exactly, or the animation would show a different cube.
+    from rubikpi import cube3d as g3
+
+    def snap(v):
+        return tuple(int(round(c)) for c in v)
+
+    rng3 = random.Random(31)
+    geometry_ok = True
+    for face in FACES:
+        start = Cube.solved()
+        start.apply_sequence(Cube.random_scramble(18, rng3))
+        turned = start.moved(face)
+        axis, angle = g3.turn_rotation(face, 1.0)
+        for cubie in g3.cubies():
+            if not g3.in_turning_layer(face, cubie):
+                for f in g3.stickers_of(cubie):
+                    i = g3.facelet_index(f, *cubie)
+                    geometry_ok &= start.faces[f][i] == turned.faces[f][i]
+                continue
+            moved_to = snap(g3.rotate(cubie, axis, angle))
+            for f in g3.stickers_of(cubie):
+                landed = g3.FACE_OF_NORMAL[snap(g3.rotate(g3.NORMALS[f],
+                                                          axis, angle))]
+                geometry_ok &= (
+                    start.faces[f][g3.facelet_index(f, *cubie)]
+                    == turned.faces[landed][g3.facelet_index(landed,
+                                                             *moved_to)])
+    all_ok &= check("turning cubies in 3D matches the move engine",
+                    geometry_ok)
+    all_ok &= check(
+        "every cubie sticker maps to a distinct facelet",
+        len({(f, g3.facelet_index(f, *c)) for c in g3.cubies()
+             for f in g3.stickers_of(c)}) == 54,
+    )
+
+    # The view stays anchored to colours: blue front, yellow up, whatever
+    # rotations a solution contains.
+    from rubikpi.cube import orientation_for_colors
+
+    anchored = True
+    for rot in ("", "y", "y2", "x", "z'", "x2 y", "y' x'"):
+        probe = Cube.solved()
+        probe.apply_sequence(rot)
+        seq = orientation_for_colors(probe, DEFAULT_SCHEME["U"],
+                                     DEFAULT_SCHEME["F"])
+        anchored &= seq is not None
+        if seq is not None:
+            probe.apply_sequence(seq)
+            anchored &= (probe.center("F") == DEFAULT_SCHEME["F"]
+                         and probe.center("U") == DEFAULT_SCHEME["U"])
+    all_ok &= check("the 3D view always shows blue at the front", anchored)
+
     # Camera position: your left/right depend on which side it watches.
-    from rubikpi.cube import FACES, OPPOSITE, held_faces
+    from rubikpi.cube import OPPOSITE, held_faces
 
     grips = {cam: held_faces(OPPOSITE[cam], "U") for cam in ("F", "R", "B", "L")}
     all_ok &= check(
