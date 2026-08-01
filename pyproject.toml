@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rubikpi"
+version = "0.1.0"
+description = "RubikPI — a visual Rubik's Cube solver: camera recognition, staged solutions and a tree of possibilities (PyQt6 + OpenCV)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Gwilherm Kerherve" }]
+dependencies = [
+    "PyQt6>=6.5",
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+solvers = ["rubik-solver>=0.2.0", "kociemba>=1.2"]
+
+[project.gui-scripts]
+rubikpi = "rubikpi.app:main"
+
+[tool.setuptools]
+packages = ["rubikpi"]
