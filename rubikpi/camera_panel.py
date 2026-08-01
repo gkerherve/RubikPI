@@ -17,7 +17,9 @@ from PyQt6.QtWidgets import (
     QSpinBox, QVBoxLayout, QWidget,
 )
 
-from rubikpi.vision import SCAN_STEPS, CameraWorker, unmirror
+from rubikpi.vision import (
+    COLOR_NAME, EXPECTED_CENTER, SCAN_STEPS, CameraWorker, unmirror,
+)
 
 
 class CameraPanel(QWidget):
@@ -153,7 +155,16 @@ class CameraPanel(QWidget):
         self._last_stable = stable
         if (newly_stable and self.auto_capture.isChecked()
                 and self.scan_index < len(SCAN_STEPS)):
-            self.capture_now()
+            face, _ = SCAN_STEPS[self.scan_index]
+            want = EXPECTED_CENTER[face]
+            got = grid[4]
+            if got == want:
+                self.capture_now()
+            else:
+                self.status.emit(
+                    f"Face {face} needs a {COLOR_NAME[want].upper()} centre "
+                    f"— I see {COLOR_NAME.get(got, got)}. Turn the cube, or "
+                    "press Capture to force it.")
 
     def _on_camera_error(self, message: str) -> None:
         self.stop_camera()
@@ -164,6 +175,10 @@ class CameraPanel(QWidget):
 
     def capture_now(self) -> None:
         if self.scan_index >= len(SCAN_STEPS) or not self._last_grid:
+            return
+        if "X" in self._last_grid:
+            self.status.emit("No cube detected — hold the face flat towards "
+                             "the camera, filling the green square.")
             return
         face, _ = SCAN_STEPS[self.scan_index]
         colors = unmirror(self._last_grid)

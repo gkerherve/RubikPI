@@ -2,7 +2,20 @@
 
 All notable changes to RubikPI.
 
-## 0.1.0 — 2026-08-01
+## 0.2.0 — 2026-08-01
+
+The camera now finds the cube instead of hoping it is in the middle.
+
+- Cube localisation: sticker-sized squares are detected with a contour scan,
+  clustered into a face, and the 3x3 grid is sampled from the detected face
+  only — the overlay follows the cube around the frame.
+- While no cube is visible the grid reads "unknown" and can never stabilise,
+  so auto-capture no longer locks onto walls or faces.
+- Auto-capture checks the centre sticker against the face being scanned
+  (F=green, R=red, B=blue, L=orange, U=white, D=yellow) and tells you which
+  colour it sees when it refuses; manual Capture can still force it.
+- Manual capture is refused while no cube is detected.
+- Slightly wider white and orange bands in the HSV classifier.
 
 First release.
 
