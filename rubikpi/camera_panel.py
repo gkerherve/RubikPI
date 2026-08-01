@@ -37,6 +37,7 @@ class CameraPanel(QWidget):
         self.scan_index = 0
         self.captured: dict[str, list[str]] = {}
         self._last_grid: list[str] = []
+        self._last_raw: list[tuple[float, float, float]] = []
         self._last_stable = False
         self._build_ui()
         self._refresh_progress()
@@ -145,12 +146,14 @@ class CameraPanel(QWidget):
 
     # -- frame handling ------------------------------------------------------
 
-    def _on_frame(self, image: QImage, grid: list, stable: bool) -> None:
+    def _on_frame(self, image: QImage, grid: list, stable: bool,
+                  raw: list) -> None:
         pix = QPixmap.fromImage(image).scaled(
             self.video.size(), Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation)
         self.video.setPixmap(pix)
         self._last_grid = list(grid)
+        self._last_raw = list(raw)
         newly_stable = stable and not self._last_stable
         self._last_stable = stable
         if (newly_stable and self.auto_capture.isChecked()
@@ -182,6 +185,12 @@ class CameraPanel(QWidget):
             return
         face, _ = SCAN_STEPS[self.scan_index]
         colors = unmirror(self._last_grid)
+        # The protocol fixes which centre this step shows: feed its measured
+        # colour back to the worker so later faces classify against this
+        # cube's real stickers under this lighting.
+        if (self.worker is not None and self._last_raw
+                and colors[4] == EXPECTED_CENTER[face]):
+            self.worker.learn_center(EXPECTED_CENTER[face], self._last_raw[4])
         self.captured[face] = colors
         self.face_captured.emit(face, colors)
         self.scan_index += 1

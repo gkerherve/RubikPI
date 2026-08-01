@@ -65,29 +65,30 @@ def unmirror(grid: list[str]) -> list[str]:
     return [grid[r * 3 + (2 - c)] for r in range(3) for c in range(3)]
 
 
-def classify_hsv(h: float, s: float, v: float) -> str:
-    """Map an OpenCV HSV sample (h in 0..179) to a cube colour letter."""
-    if v < 45:
+def classify_lab(lab: tuple[float, float, float],
+                 refs: dict[str, tuple[float, float, float]]) -> str:
+    """Nearest-reference classification in OpenCV Lab space.
+
+    Lightness is down-weighted so shadows and lamp brightness matter less
+    than the actual chroma of the sticker.
+    """
+    L, a, b = lab
+    if L < 35:
         return "X"
-    if s < 70 and v > 110:
-        return "W"
-    if h < 9 or h >= 160:
-        return "R"
-    if h < 22:
-        return "O"
-    if h < 40:
-        return "Y"
-    if h < 88:
-        return "G"
-    if h < 140:
-        return "B"
-    return "R"
+    best = None
+    letter = "X"
+    for name, (rl, ra, rb) in refs.items():
+        d = 0.30 * (L - rl) ** 2 + (a - ra) ** 2 + (b - rb) ** 2
+        if best is None or d < best:
+            best, letter = d, name
+    return letter
 
 
 class CameraWorker(QThread):
     """Grabs frames, locates the cube, reads the 3x3 grid, emits images."""
 
-    frame_ready = pyqtSignal(QImage, list, bool)  # image, 9 colours, stable
+    # image, 9 colour letters, stable, 9 raw Lab samples
+    frame_ready = pyqtSignal(QImage, list, bool, list)
     camera_error = pyqtSignal(str)
 
     STABLE_FRAMES = 8
@@ -100,6 +101,21 @@ class CameraWorker(QThread):
         self._running = False
         self._last_grid: list[str] = []
         self._stable_count = 0
+        self._refs: dict[str, tuple[float, float, float]] | None = None
+
+    def learn_center(self, letter: str, lab: tuple[float, float, float]
+                     ) -> None:
+        """Calibrate one colour reference from a captured centre sticker.
+
+        The scan protocol fixes which centre each step shows, so the
+        measured Lab value is ground truth for that colour under the
+        user's lighting.  Blended, not replaced, to survive one bad frame.
+        """
+        if self._refs is None or letter not in self._refs:
+            return
+        old = self._refs[letter]
+        self._refs[letter] = tuple(
+            0.4 * o + 0.6 * n for o, n in zip(old, lab))
 
     def stop(self) -> None:
         self._running = False
@@ -126,6 +142,9 @@ class CameraWorker(QThread):
             )
             return
 
+        if self._refs is None:
+            self._refs = self._default_refs(cv2, np)
+
         self._running = True
         rect: tuple[float, float, float] | None = None  # smoothed x0, y0, size
         lost = 0
@@ -149,9 +168,11 @@ class CameraWorker(QThread):
                     rect = None
 
             if rect is not None:
-                grid = self._sample_grid(cv2, np, frame, rect)
+                grid, raw = self._sample_grid(cv2, np, frame, rect,
+                                              self._refs)
             else:
                 grid = ["X"] * 9  # no cube in view — never stabilises
+                raw = [(0.0, 128.0, 128.0)] * 9
 
             if grid == self._last_grid and "X" not in grid:
                 self._stable_count += 1
@@ -164,7 +185,7 @@ class CameraWorker(QThread):
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
-            self.frame_ready.emit(img.copy(), grid, stable)
+            self.frame_ready.emit(img.copy(), grid, stable, raw)
             self.msleep(30)
 
         cap.release()
@@ -249,14 +270,28 @@ class CameraWorker(QThread):
         return (x0, y0, size)
 
     @staticmethod
-    def _sample_grid(cv2, np, frame, rect: tuple[float, float, float]
-                     ) -> list[str]:
+    def _default_refs(cv2, np) -> dict[str, tuple[float, float, float]]:
+        """Starting Lab references derived from the nominal sticker colours."""
+        refs: dict[str, tuple[float, float, float]] = {}
+        for letter, bgr in BGR.items():
+            if letter == "X":
+                continue
+            px = np.uint8([[list(bgr)]])
+            lab = cv2.cvtColor(px, cv2.COLOR_BGR2LAB)[0][0]
+            refs[letter] = tuple(float(v) for v in lab)
+        return refs
+
+    @staticmethod
+    def _sample_grid(cv2, np, frame, rect: tuple[float, float, float],
+                     refs: dict[str, tuple[float, float, float]],
+                     ) -> tuple[list[str], list[tuple[float, float, float]]]:
         """Read the nine sticker colours inside the detected face square."""
         h, w = frame.shape[:2]
         x0, y0, size = rect
         cell = size / 3.0
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        lab_img = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         grid: list[str] = []
+        raw: list[tuple[float, float, float]] = []
         for row in range(3):
             for col in range(3):
                 cx = int(x0 + col * cell + cell / 2)
@@ -264,15 +299,17 @@ class CameraWorker(QThread):
                 r = max(4, int(cell / 6))
                 px0, px1 = max(cx - r, 0), min(cx + r, w)
                 py0, py1 = max(cy - r, 0), min(cy + r, h)
-                patch = hsv[py0:py1, px0:px1]
+                patch = lab_img[py0:py1, px0:px1]
                 if patch.size == 0:
                     grid.append("X")
+                    raw.append((0.0, 128.0, 128.0))
                     continue
-                hm = float(np.median(patch[:, :, 0]))
-                sm = float(np.median(patch[:, :, 1]))
-                vm = float(np.median(patch[:, :, 2]))
-                grid.append(classify_hsv(hm, sm, vm))
-        return grid
+                sample = (float(np.median(patch[:, :, 0])),
+                          float(np.median(patch[:, :, 1])),
+                          float(np.median(patch[:, :, 2])))
+                grid.append(classify_lab(sample, refs))
+                raw.append(sample)
+        return grid, raw
 
     # -- overlay -------------------------------------------------------------
 

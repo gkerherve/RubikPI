@@ -2,7 +2,20 @@
 
 All notable changes to RubikPI.
 
-## 0.2.0 — 2026-08-01
+## 0.3.0 — 2026-08-01
+
+Self-calibrating colours, inspired by cubed-core's calibration step
+(ideas only — its AGPL code is not used).
+
+- Sticker colours are now classified by nearest reference in Lab space
+  (lightness down-weighted), replacing the fixed HSV hue bands.
+- The scanner calibrates itself as you scan: each captured centre sticker
+  is ground truth for its colour (the protocol fixes which centre each
+  step shows), so later faces are matched against your cube's real
+  stickers under your lighting — the classic red/orange confusion fades
+  after the first few faces.
+- References start from the nominal sticker colours and are blended, not
+  replaced, so one bad frame cannot poison the calibration.
 
 The camera now finds the cube instead of hoping it is in the middle.
 
