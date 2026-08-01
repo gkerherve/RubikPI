@@ -91,6 +91,35 @@ def main() -> int:
     c.apply("R")
     all_ok &= check("R breaks the D first layer", not first_layer_done(c, "D"))
 
+    # Corner-view scan maps (vision.py imports Qt lazily enough to allow
+    # headless use of its pure-geometry tables).
+    from rubikpi.vision import VIEW_MAPS
+
+    all_ok &= check(
+        "scan maps are permutations",
+        all(sorted(idxs) == list(range(9))
+            for vmap in VIEW_MAPS for _, idxs in vmap.values()),
+    )
+    v0 = VIEW_MAPS[0]
+    all_ok &= check(
+        "view 1 front vertex is the URF corner (U8, F2, R0)",
+        (v0["top"][1][0], v0["left"][1][0], v0["right"][1][0]) == (8, 2, 0),
+    )
+    # View 2 must read exactly what view 1 reads on the cube reoriented
+    # by "y x2" (white top / green left -> yellow top / orange left).
+    c = Cube.solved()
+    c.apply_sequence(Cube.random_scramble(25, random.Random(11)))
+    r = c.copy()
+    r.apply_sequence("y x2")
+    consistent = True
+    for panel in ("top", "left", "right"):
+        f1, m1 = VIEW_MAPS[0][panel]
+        f2, m2 = VIEW_MAPS[1][panel]
+        for cell in range(9):
+            if c.faces[f2][m2[cell]] != r.faces[f1][m1[cell]]:
+                consistent = False
+    all_ok &= check("view 2 = view 1 of the cube after y x2", consistent)
+
     # Solver round-trip (only if a solver backend is installed).
     try:
         from rubikpi.solver import solve

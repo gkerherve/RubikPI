@@ -2,7 +2,25 @@
 
 All notable changes to RubikPI.
 
-## 0.3.0 — 2026-08-01
+## 0.4.0 — 2026-08-01
+
+Corner-view scanning: three faces at once, whole cube in two captures.
+
+- The camera now reads the cube corner-on — top face plus both visible
+  side panels (27 stickers per frame) — so a full scan is 2 views
+  instead of 6 flat-on faces: white-top/green/red, then flip to
+  yellow-top/orange/blue.
+- The detector finds sticker-shaped quads (rhombi and leaning
+  parallelograms), clusters them and fits the isometric hexagon; the
+  guide wireframe with per-panel colour labels follows the cube.
+- Detection and sampling run on the true (unmirrored) frame; only the
+  display is mirrored, so captured faces need no mirror correction.
+- New self-tests prove the view-to-facelet maps: permutation check, URF
+  anchor check, and view 2 must equal view 1 of the cube reoriented by
+  "y x2" (verified through the move engine).
+- White vs yellow: unchanged Lab classifier, but centre calibration now
+  happens three faces at a time, so by view 2 white/yellow and
+  red/orange are matched against this cube's measured stickers.
 
 Self-calibrating colours, inspired by cubed-core's calibration step
 (ideas only — its AGPL code is not used).
