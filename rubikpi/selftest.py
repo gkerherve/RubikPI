@@ -147,6 +147,25 @@ def main() -> int:
     all_ok &= check("two swapped edges are rejected",
                     not swapped.is_solvable()[0])
 
+    # Colour scheme: one source of truth, and mirror schemes rejected.
+    from rubikpi.cube import DEFAULT_SCHEME, scheme_is_possible
+    from rubikpi.vision import EXPECTED_CENTER
+
+    all_ok &= check("the cube's colour scheme is physically possible",
+                    scheme_is_possible(DEFAULT_SCHEME))
+    all_ok &= check("scan guidance uses that same scheme",
+                    EXPECTED_CENTER == DEFAULT_SCHEME)
+    mirrored = dict(DEFAULT_SCHEME)
+    mirrored["R"], mirrored["L"] = mirrored["L"], mirrored["R"]
+    all_ok &= check("a mirror-image scheme is rejected",
+                    not scheme_is_possible(mirrored))
+    mixed = Cube.solved()
+    for i in range(9):
+        mixed.faces["R"][i], mixed.faces["L"][i] = (mixed.faces["L"][i],
+                                                    mixed.faces["R"][i])
+    all_ok &= check("a cube with swapped red/orange centres is rejected",
+                    not mixed.is_solvable()[0])
+
     # Follow-along tracker: rotations and turns, from any orientation.
     from rubikpi import tracker as tk
 

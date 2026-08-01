@@ -2,7 +2,23 @@
 
 All notable changes to RubikPI.
 
-## 0.6.0 — 2026-08-01
+## 0.7.0 — 2026-08-01
+
+The cube's colour scheme is now yours, and defined in one place.
+
+- Faces follow the centre colours: **yellow up, white down, blue front,
+  green back, red right, orange left**. (The same physical cube as
+  before, held the other way up — `x2` from white-up/green-front.)
+- `cube.DEFAULT_SCHEME` is the single source of truth: expected centres,
+  every scan instruction and the on-screen guides are generated from it,
+  so a differently-coloured cube needs only those six letters changed.
+  No colour words are hard-coded in the scan protocol any more.
+- New check: six centre colours that would need a *mirror-image* cube are
+  rejected with "two centres are swapped (most often red with orange, or
+  white with yellow)". This catches a misread that every count-based
+  check passes.
+- Messages name the actual colours of the cube in use rather than
+  assuming white and yellow are the top and bottom.
 
 Follow-along tracking, plain-English steps, and honest error messages.
 

@@ -29,38 +29,47 @@ from __future__ import annotations
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QImage
 
+from rubikpi.cube import COLOR_NAME, DEFAULT_SCHEME
+
+#: Centre sticker each face must show.  The centres *are* the face names,
+#: so this is just the cube's colour scheme (see cube.DEFAULT_SCHEME):
+#: change it there and every instruction below follows.
+EXPECTED_CENTER: dict[str, str] = dict(DEFAULT_SCHEME)
+
+
+def _name(face: str, caps: bool = True) -> str:
+    """Colour word for a face, e.g. "BLUE" for F on a blue-front cube."""
+    word = COLOR_NAME[EXPECTED_CENTER[face]]
+    return word.upper() if caps else word
+
+
 #: Guided scan protocol: two corner views of three faces each.
 SCAN_VIEWS: list[tuple[tuple[str, str, str], str]] = [
     (("U", "F", "R"),
-     "Hold the cube corner-on: WHITE on top, GREEN and RED on the two "
-     "panels shown by the guide."),
+     f"Hold the cube corner-on: {_name('U')} on top, {_name('F')} and "
+     f"{_name('R')} on the two panels shown by the guide."),
     (("D", "L", "B"),
-     "Flip the cube over: YELLOW on top, ORANGE and BLUE on the two "
-     "panels shown by the guide."),
+     f"Flip the cube over: {_name('D')} on top, {_name('L')} and "
+     f"{_name('B')} on the two panels shown by the guide."),
 ]
 
 #: Easy-mode protocol: one flat-on face per step, (face, instruction).
-#: Holding white on top / green towards you, every captured grid maps
-#: 1:1 onto the face's sticker indices — no mental rotation needed.
+#: Held with the U colour on top and the F colour towards you, every
+#: captured grid maps 1:1 onto the face's sticker indices — no mental
+#: rotation needed.
 SCAN_STEPS: list[tuple[str, str]] = [
-    ("F", "Show the GREEN centre face, WHITE centre on top."),
-    ("R", "Turn the cube LEFT (y): show the RED centre, white still on top."),
-    ("B", "Turn LEFT again: show the BLUE centre, white still on top."),
-    ("L", "Turn LEFT again: show the ORANGE centre, white still on top."),
-    ("U", "Back to green in front, then TILT the cube DOWN: white faces you."),
-    ("D", "From green in front, TILT the cube UP: yellow faces you."),
+    ("F", f"Show the {_name('F')} centre face, {_name('U')} centre on top."),
+    ("R", f"Turn the cube LEFT (y): show the {_name('R')} centre, "
+          f"{_name('U', False)} still on top."),
+    ("B", f"Turn LEFT again: show the {_name('B')} centre, "
+          f"{_name('U', False)} still on top."),
+    ("L", f"Turn LEFT again: show the {_name('L')} centre, "
+          f"{_name('U', False)} still on top."),
+    ("U", f"Back to {_name('F', False)} in front, then TILT the cube DOWN: "
+          f"{_name('U', False)} faces you."),
+    ("D", f"From {_name('F', False)} in front, TILT the cube UP: "
+          f"{_name('D', False)} faces you."),
 ]
-
-#: Centre sticker each face must show (standard colour scheme).
-EXPECTED_CENTER: dict[str, str] = {
-    "U": "W", "F": "G", "R": "R", "D": "Y", "L": "O", "B": "B",
-}
-
-#: Human names for the colour letters, for status messages.
-COLOR_NAME = {
-    "W": "white", "Y": "yellow", "R": "red",
-    "O": "orange", "G": "green", "B": "blue", "X": "unknown",
-}
 
 #: Display colours (BGR for OpenCV overlays) for each sticker letter.
 BGR = {

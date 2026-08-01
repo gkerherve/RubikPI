@@ -31,12 +31,26 @@ from dataclasses import dataclass, field
 
 FACES: tuple[str, ...] = ("U", "R", "F", "D", "L", "B")
 
-#: Colour of each face on a solved cube (Western colour scheme).
+#: Colour of each face on a solved cube — the single source of truth for
+#: every scan instruction and on-screen guide.  Face names are internal
+#: labels; what fixes them is the centre colour, so this is simply how the
+#: cube is held: yellow up, white down, blue front, green back, red right,
+#: orange left.  (That is the standard Western cube held ``x2`` from the
+#: white-up/green-front position — same cube, different way round.)
+#:
+#: Change these six letters to match a differently-coloured cube and the
+#: whole app follows: expected centres, scan wording and the guides.
 DEFAULT_SCHEME: dict[str, str] = {
-    "U": "W", "R": "R", "F": "G", "D": "Y", "L": "O", "B": "B",
+    "U": "Y", "R": "R", "F": "B", "D": "W", "L": "O", "B": "G",
 }
 
 OPPOSITE: dict[str, str] = {"U": "D", "D": "U", "R": "L", "L": "R", "F": "B", "B": "F"}
+
+#: Human names for the sticker letters, for every message the user reads.
+COLOR_NAME: dict[str, str] = {
+    "W": "white", "Y": "yellow", "R": "red",
+    "O": "orange", "G": "green", "B": "blue", "X": "unknown",
+}
 
 UNKNOWN = "X"
 
@@ -202,6 +216,10 @@ class Cube:
             return False, why
 
         scheme = self.color_scheme()             # face -> colour
+        if not scheme_is_possible(scheme):
+            return False, ("Those six centre colours cannot sit on one cube "
+                           "— two centres are swapped (most often red with "
+                           "orange, or white with yellow).")
         face_of = {c: f for f, c in scheme.items()}
         ud = {scheme["U"], scheme["D"]}
         fb = {scheme["F"], scheme["B"]}
@@ -224,8 +242,9 @@ class Cube:
             corner_perm.append(solved_corners[key])
             oriented = [j for j, c in enumerate(colors) if c in ud]
             if len(oriented) != 1:
+                pair = " or ".join(COLOR_NAME[c] for c in sorted(ud))
                 return False, (f"Corner {slot_name(slot)} has no single "
-                               "white/yellow sticker — recheck it.")
+                               f"{pair} sticker — recheck it.")
             twist += oriented[0]
         if len(set(corner_perm)) != 8:
             return False, ("The same corner piece appears twice — at least "
@@ -354,6 +373,35 @@ class Cube:
     def from_serialised(cls, data: str) -> "Cube":
         faces = {f: list(data[i * 9:(i + 1) * 9]) for i, f in enumerate(FACES)}
         return cls(faces=faces)
+
+
+#: Rotation sequences reaching each of the 24 ways to hold a cube.
+_ORIENTATIONS: tuple[str, ...] = tuple(
+    (spin + " " + tilt).strip()
+    for tilt in ("", "x", "x2", "x'", "z", "z'")
+    for spin in ("", "y", "y2", "y'")
+)
+
+
+def possible_schemes() -> list[dict[str, str]]:
+    """Every centre arrangement a real cube can show (24 orientations)."""
+    out: list[dict[str, str]] = []
+    for seq in _ORIENTATIONS:
+        probe = Cube(faces={f: [DEFAULT_SCHEME[f]] * 9 for f in FACES})
+        probe.apply_sequence(seq)
+        out.append({f: probe.center(f) for f in FACES})
+    return out
+
+
+def scheme_is_possible(scheme: dict[str, str]) -> bool:
+    """Could these six centre colours sit on one physical cube?
+
+    Catches mirror-image arrangements, which pass every "9 of each
+    colour" style check yet cannot exist — typically a red/orange or
+    white/yellow mix-up in the scan.
+    """
+    return any(all(scheme.get(f) == s[f] for f in FACES)
+               for s in possible_schemes())
 
 
 def _perm_parity(perm: list[int]) -> int:
