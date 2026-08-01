@@ -21,11 +21,14 @@ from PyQt6.QtWidgets import (
 
 from rubikpi import __app_name__, __version__
 from rubikpi.camera_panel import CameraPanel
-from rubikpi.cube import Cube, invert_sequence
+from rubikpi.cube import (
+    COLOR_NAME, DEFAULT_SCHEME, FACES, OPPOSITE, Cube, held_faces,
+    invert_sequence,
+)
 from rubikpi.cube_view import CubeViewWidget
 from rubikpi.solution_tree import SolutionTreePanel, move_in_words
 from rubikpi.solver import MODES, Solution, solve
-from rubikpi.tracker import best_match, describe_rotation, facing_description
+from rubikpi.tracker import best_match, describe_rotation, facing_face
 
 STYLE = """
 QMainWindow, QWidget { background: #1d2026; color: #d8dce2;
@@ -128,6 +131,27 @@ class MainWindow(QMainWindow):
         self.view = CubeViewWidget(mid)
         mv.addWidget(self.view, stretch=1)
 
+        # Which side of the cube the camera is on.  This does not change
+        # the solution, but it decides whether "the red face" is on your
+        # right or your left — the camera sees you from the other side.
+        cam_row = QHBoxLayout()
+        cam_row.addWidget(QLabel("Camera sees:"))
+        self.camera_face = QComboBox()
+        # Only the four side faces: while solving you hold the cube with a
+        # side towards the camera and the U colour on top, so pointing the
+        # top or bottom at it is not a grip anyone uses.
+        for face in ("F", "R", "B", "L"):
+            self.camera_face.addItem(
+                f"{COLOR_NAME[DEFAULT_SCHEME[face]]} side".capitalize(), face)
+        self.camera_face.setCurrentIndex(2)  # green side, the usual way round
+        self.camera_face.setToolTip(
+            "The face you point at the camera while solving.\n"
+            "You are looking at the opposite side, so this is what makes "
+            "“on your right” mean your right — not the camera's.")
+        self.camera_face.currentIndexChanged.connect(self._on_camera_face)
+        cam_row.addWidget(self.camera_face, stretch=1)
+        mv.addLayout(cam_row)
+
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("Mode:"))
         self.mode_box = QComboBox()
@@ -173,6 +197,7 @@ class MainWindow(QMainWindow):
         self.tree_panel.jump_requested.connect(self.jump_to)
         splitter.addWidget(self.tree_panel)
 
+        self.tree_panel.set_holding(self.holding())
         splitter.setSizes([420, 480, 380])
         self.statusBar().showMessage(
             "Welcome to RubikPI — scan your cube or try a demo scramble.")
@@ -183,6 +208,29 @@ class MainWindow(QMainWindow):
                   activated=self.step_forward)
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, activated=self.step_back)
         self.resize(1320, 760)
+
+    # -- how the cube is held -------------------------------------------------
+
+    def camera_facing(self) -> str:
+        """The face pointed at the camera (you see the opposite one)."""
+        return self.camera_face.currentData() or "B"
+
+    def holding(self) -> dict[str, str]:
+        """Which face is where, from the point of view of whoever holds it."""
+        front = OPPOSITE[self.camera_facing()]
+        # Belt and braces: an exception raised inside a Qt slot kills the
+        # whole application, so never let an odd grip get that far.
+        up = "U" if front not in ("U", "D") else "B"
+        return held_faces(front, up)
+
+    def _on_camera_face(self) -> None:
+        self.tree_panel.set_holding(self.holding())
+        cam = COLOR_NAME[DEFAULT_SCHEME[self.camera_facing()]]
+        you = COLOR_NAME[DEFAULT_SCHEME[OPPOSITE[self.camera_facing()]]]
+        right = COLOR_NAME[DEFAULT_SCHEME[self.holding()["R"]]]
+        self._say(f"Camera on the {cam} side, so you are looking at the "
+                  f"{you} side — {right} is on your right.")
+        self._follow_orient = None  # re-announce the view next frame
 
     def _refresh_title(self) -> None:
         mode = self.mode_box.currentText() if hasattr(self, "mode_box") else ""
@@ -350,17 +398,18 @@ class MainWindow(QMainWindow):
             # Nothing turned — but the cube may have been rotated.
             if self._follow_orient is None:
                 self._follow_orient = match.orientation
-                self._say(f"Tracking — you are showing me the "
-                          f"{facing_description(self.cube, match.orientation)}"
-                          " face.")
+                self._say("Tracking — the "
+                          f"{self._colour_at_camera(match.orientation)} side "
+                          "is facing the camera.")
             elif match.orientation != self._follow_orient:
                 how = describe_rotation(self._follow_orient, match.orientation)
-                where = facing_description(self.cube, match.orientation)
+                shown = self._colour_at_camera(match.orientation)
                 self._follow_orient = match.orientation
                 if self.progress < len(self.solution.moves):
                     nxt = self.solution.moves[self.progress]
-                    self._say(f"You {how} — now showing the {where} face. "
-                              f"Next move: {nxt} ({move_in_words(nxt)})")
+                    self._say(f"You {how} — the {shown} side now faces the "
+                              f"camera. Next: {nxt}, "
+                              f"{move_in_words(nxt, self.holding())}")
                 else:
                     self._say(f"You {how}. All done!")
             self._pending_move = ""
@@ -379,6 +428,10 @@ class MainWindow(QMainWindow):
         self._pending_votes = 0
         self._follow_orient = match.orientation
         self._accept_user_move(match.move)
+
+    def _colour_at_camera(self, orientation: int) -> str:
+        """Colour of the side pointing at the camera in that orientation."""
+        return COLOR_NAME[self.cube.center(facing_face(orientation))]
 
     def _accept_user_move(self, move: str) -> None:
         """Apply a move the user physically made and re-sync the plan."""

@@ -155,11 +155,16 @@ def describe_rotation(previous: int, current: int) -> str:
     return "turned it round"
 
 
-def facing_description(cube: Cube, orientation: int) -> str:
-    """Which face of the *solved* colour scheme is pointing at the camera."""
+def facing_face(orientation: int) -> str:
+    """Which face of the cube points at the camera in that orientation."""
     probe = Cube(faces={f: [f] * 9 for f in
                         ("U", "R", "F", "D", "L", "B")})
     probe.apply_sequence(ORIENTATIONS[orientation])
+    return probe.center("F")
+
+
+def facing_description(cube: Cube, orientation: int) -> str:
+    """Name of the face pointing at the camera ("front", "back", ...)."""
     names = {"F": "front", "B": "back", "U": "top",
              "D": "bottom", "L": "left", "R": "right"}
-    return names.get(probe.center("F"), "?")
+    return names.get(facing_face(orientation), "?")

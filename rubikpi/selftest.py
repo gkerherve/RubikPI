@@ -166,6 +166,28 @@ def main() -> int:
     all_ok &= check("a cube with swapped red/orange centres is rejected",
                     not mixed.is_solvable()[0])
 
+    # Camera position: your left/right depend on which side it watches.
+    from rubikpi.cube import FACES, OPPOSITE, held_faces
+
+    grips = {cam: held_faces(OPPOSITE[cam], "U") for cam in ("F", "R", "B", "L")}
+    all_ok &= check(
+        "camera on the back -> R is on your right; camera on the front -> "
+        "R is on your left",
+        grips["B"]["R"] == "R" and grips["F"]["L"] == "R",
+    )
+    all_ok &= check(
+        "every grip is a real way to hold the cube",
+        all(sorted(g.values()) == sorted(FACES) for g in grips.values()),
+    )
+    impossible = 0
+    for front, up in (("U", "U"), ("U", "D"), ("F", "B")):
+        try:
+            held_faces(front, up)
+        except ValueError:
+            impossible += 1
+    all_ok &= check("impossible grips are refused, not crashed on",
+                    impossible == 3)
+
     # Follow-along tracker: rotations and turns, from any orientation.
     from rubikpi import tracker as tk
 

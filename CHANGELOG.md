@@ -2,7 +2,28 @@
 
 All notable changes to RubikPI.
 
-## 0.7.0 — 2026-08-01
+## 0.8.0 — 2026-08-01
+
+RubikPI now knows which side of the cube the camera is on.
+
+- New **"Camera sees"** setting (middle panel), defaulting to the green
+  side — the usual way round, with you looking at the blue side. The
+  camera watches from the opposite side to you, so this is what decides
+  whether a move is on your right or your left.
+- Every instruction now names the **colour**, which is unambiguous from
+  any viewpoint, plus where it is as you hold it: "R — turn the RED face
+  (on your right) clockwise". Move the camera to the blue side and the
+  same move reads "turn the RED face (on your left) clockwise".
+- Follow-along messages speak in colours too: "you turned it left — the
+  red side now faces the camera".
+- Fixed a crash: choosing the top or bottom face as the camera position
+  asked for an impossible grip (bottom towards you *and* top up), and an
+  exception inside a Qt signal handler terminates the whole application.
+  The setting now offers only the four side faces, `held_faces()`
+  rejects same-axis grips with a clear error, and the caller can no
+  longer pass one.
+- New self-tests: left/right flip with camera position, every grip is a
+  real one, and impossible grips raise instead of crashing.
 
 The cube's colour scheme is now yours, and defined in one place.
 

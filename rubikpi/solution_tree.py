@@ -25,7 +25,9 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from rubikpi.cube import ALL_MOVES, Cube
+from rubikpi.cube import (
+    ALL_MOVES, COLOR_NAME, DEFAULT_SCHEME, Cube, held_faces,
+)
 from rubikpi.solver import Solution
 
 _ROLE_MOVE_INDEX = Qt.ItemDataRole.UserRole
@@ -48,13 +50,26 @@ FACE_WORDS = {
     "S": "middle slice (follow the front face)",
 }
 
+#: Where each position sits from the point of view of the person holding
+#: the cube (the camera is on the other side, looking back at them).
+POSITION_WORDS = {
+    "R": "on your right", "L": "on your left", "U": "on top",
+    "D": "underneath", "F": "facing you", "B": "facing the camera",
+}
 
-def move_in_words(move: str) -> str:
-    """"R'" -> "turn the RIGHT face anticlockwise"."""
+
+def move_in_words(move: str, held: dict[str, str] | None = None,
+                  scheme: dict[str, str] | None = None) -> str:
+    """Spell a move out unambiguously.
+
+    Face letters alone are ambiguous when the camera looks at the cube
+    from the opposite side to you — your right is its left.  Naming the
+    *colour* removes all doubt, and *held* (see :func:`cube.held_faces`)
+    adds where that colour is as you are holding it.
+    """
     if not move:
         return "—"
     core = move[0]
-    face = FACE_WORDS.get(core, core)
     if move.endswith("2"):
         turn = "half a turn (180°)"
     elif move.endswith("'"):
@@ -62,10 +77,19 @@ def move_in_words(move: str) -> str:
     else:
         turn = "clockwise"
     if core in ("M", "E", "S"):
-        return f"turn the {face} {turn}"
-    if move[1:2] == "w":
-        return f"turn the {face.upper()} face and the slice behind it {turn}"
-    return f"turn the {face.upper()} face {turn}"
+        return f"turn the {FACE_WORDS[core]} {turn}"
+
+    scheme = scheme or DEFAULT_SCHEME
+    colour = COLOR_NAME.get(scheme.get(core, ""), "").upper()
+    where = ""
+    if held:
+        position = {face: pos for pos, face in held.items()}.get(core)
+        if position:
+            where = f" ({POSITION_WORDS[position]})"
+    wide = " and the slice behind it" if move[1:2] == "w" else ""
+    if colour:
+        return f"turn the {colour} face{where}{wide} {turn}"
+    return f"turn the {FACE_WORDS.get(core, core).upper()} face{wide} {turn}"
 
 
 class SolutionTreePanel(QWidget):
@@ -78,6 +102,9 @@ class SolutionTreePanel(QWidget):
         self.cube = Cube.unknown()
         self.solution: Solution | None = None
         self.progress = 0  # moves of the solution already played
+        #: How the user holds the cube — set from the camera position, so
+        #: "on your right" is right for them and not for the camera.
+        self.held: dict[str, str] = held_faces("F", "U")
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
@@ -137,6 +164,12 @@ class SolutionTreePanel(QWidget):
 
     # -- public API ----------------------------------------------------------
 
+    def set_holding(self, held: dict[str, str]) -> None:
+        """Tell the panel how the cube is being held (see camera setting)."""
+        self.held = dict(held)
+        self._refresh_card()
+        self._refresh_steps()
+
     def set_state(self, cube: Cube, solution: Solution | None,
                   progress: int) -> None:
         """Rebuild the panel for a new cube state / solution / progress."""
@@ -167,7 +200,7 @@ class SolutionTreePanel(QWidget):
             return
         move = sol.moves[self.progress]
         self.next_move.setText(move)
-        self.next_words.setText(move_in_words(move))
+        self.next_words.setText(move_in_words(move, self.held))
         stage = self._stage_at(self.progress)
         stage_txt = f"{stage.label}  ·  " if stage else ""
         self.progress_label.setText(
@@ -206,7 +239,7 @@ class SolutionTreePanel(QWidget):
             for k, move in enumerate(stage.moves):
                 idx = stage.start_index + k
                 child = QTreeWidgetItem(
-                    [f"{idx + 1}.  {move}", move_in_words(move)])
+                    [f"{idx + 1}.  {move}", move_in_words(move, self.held)])
                 child.setData(0, _ROLE_MOVE_INDEX, idx)
                 if idx < done:
                     child.setForeground(0, _DIM)
@@ -266,8 +299,8 @@ class SolutionTreePanel(QWidget):
             entries.append((nxt.misplaced_count(), move, nxt))
         entries.sort(key=lambda e: (e[0], e[1]))
         for off, move, nxt in entries:
-            item = QTreeWidgetItem([f"{move} — {move_in_words(move)}",
-                                    str(off)])
+            item = QTreeWidgetItem(
+                [f"{move} — {move_in_words(move, self.held)}", str(off)])
             delta = off - base
             item.setForeground(0, _GOOD if delta < 0
                                else _BAD if delta > 0 else _NEUTRAL)

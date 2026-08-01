@@ -393,6 +393,25 @@ def possible_schemes() -> list[dict[str, str]]:
     return out
 
 
+def held_faces(front: str, up: str) -> dict[str, str]:
+    """Which face sits at each position when the cube is held a given way.
+
+    ``held_faces("B", "U")["R"]`` answers "with the B face towards me and
+    U on top, which face is on my right?".  This is what turns an
+    abstract move like ``R`` into "the face on your left" when you are
+    looking at the cube from the opposite side to the camera.
+    """
+    if front == up or OPPOSITE[front] == up:
+        raise ValueError(f"cannot hold a cube with {front} towards you and "
+                         f"{up} up — they are the same axis")
+    for seq in _ORIENTATIONS:
+        probe = Cube(faces={f: [f] * 9 for f in FACES})
+        probe.apply_sequence(seq)
+        if probe.center("F") == front and probe.center("U") == up:
+            return {pos: probe.center(pos) for pos in FACES}
+    raise ValueError(f"cannot hold a cube with {front} front and {up} up")
+
+
 def scheme_is_possible(scheme: dict[str, str]) -> bool:
     """Could these six centre colours sit on one physical cube?
 
