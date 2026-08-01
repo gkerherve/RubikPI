@@ -93,34 +93,11 @@ def main() -> int:
     c.apply("R")
     all_ok &= check("R breaks the D first layer", not first_layer_done(c, "D"))
 
-    # Corner-view scan maps (vision.py imports Qt lazily enough to allow
-    # headless use of its pure-geometry tables).
-    from rubikpi.vision import VIEW_MAPS
+    # The scan protocol covers all six faces, one at a time.
+    from rubikpi.vision import SCAN_STEPS
 
-    all_ok &= check(
-        "scan maps are permutations",
-        all(sorted(idxs) == list(range(9))
-            for vmap in VIEW_MAPS for _, idxs in vmap.values()),
-    )
-    v0 = VIEW_MAPS[0]
-    all_ok &= check(
-        "view 1 front vertex is the URF corner (U8, F2, R0)",
-        (v0["top"][1][0], v0["left"][1][0], v0["right"][1][0]) == (8, 2, 0),
-    )
-    # View 2 must read exactly what view 1 reads on the cube reoriented
-    # by "y x2" (white top / green left -> yellow top / orange left).
-    c = Cube.solved()
-    c.apply_sequence(Cube.random_scramble(25, random.Random(11)))
-    r = c.copy()
-    r.apply_sequence("y x2")
-    consistent = True
-    for panel in ("top", "left", "right"):
-        f1, m1 = VIEW_MAPS[0][panel]
-        f2, m2 = VIEW_MAPS[1][panel]
-        for cell in range(9):
-            if c.faces[f2][m2[cell]] != r.faces[f1][m1[cell]]:
-                consistent = False
-    all_ok &= check("view 2 = view 1 of the cube after y x2", consistent)
+    all_ok &= check("the scan visits every face exactly once",
+                    sorted(f for f, _ in SCAN_STEPS) == sorted(FACES))
 
     # Solvability check: accepts real states, rejects impossible ones.
     legal = all(Cube.solved().moved(m).is_solvable()[0] for m in ALL_MOVES)
@@ -243,43 +220,53 @@ def main() -> int:
     all_ok &= check("impossible grips are refused, not crashed on",
                     impossible == 3)
 
-    # Follow-along tracker: rotations and turns, from any orientation.
+    # Follow-along tracker, watching a single face.
     from rubikpi import tracker as tk
 
     c = Cube.solved()
     c.apply_sequence(Cube.random_scramble(20, random.Random(4)))
-    rot_ok = True
-    for o in range(len(tk.ORIENTATIONS)):
-        m = tk.best_match(c, tk.predict(c, o))
-        rot_ok &= m.move == "" and m.orientation == o and m.confident
-    all_ok &= check("tracker: rotation-only seen in all 24 orientations",
-                    rot_ok)
-    turn_ok = True
-    for mv in ALL_MOVES:
-        turned = c.moved(mv)
-        for o in (0, 7, 13, 22):
-            m = tk.best_match(c, tk.predict(turned, o))
-            turn_ok &= m.move == mv and m.confident
-    all_ok &= check("tracker: every move recognised from any angle", turn_ok)
-    noisy = tk.predict(c.moved("R'"), 7)
-    noisy["U"][3] = "X"
-    all_ok &= check("tracker: survives one misread sticker",
-                    tk.best_match(c, noisy).move == "R'")
 
-    # Three faces genuinely cannot determine the cube: build two legal
-    # states that agree on U, F and R but differ behind.
-    twin = Cube.solved()
-    slots = ((("D", 3), ("L", 7)), (("D", 7), ("B", 7)), (("B", 5), ("L", 3)))
-    vals = {s: [twin.faces[f][i] for f, i in s] for s in slots}
-    for dst, src in zip(slots, (slots[1], slots[2], slots[0])):
-        for (f, i), v in zip(dst, vals[src]):
-            twin.faces[f][i] = v
     all_ok &= check(
-        "two different legal cubes can share the same three faces",
-        twin.is_solvable()[0]
-        and all(twin.faces[f] == Cube.solved().faces[f] for f in "UFR")
-        and twin.faces != Cube.solved().faces,
+        "the visible face is identified from its centre sticker",
+        all(tk.visible_face(c, tk.rotate_face(c.faces[f], k)) == f
+            for f in FACES for k in range(4)),
     )
+
+    watched = "B"
+    neighbours = [m for m in ALL_MOVES
+                  if m[0] not in (watched, OPPOSITE[watched])]
+    neighbour_ok = True
+    for mv in neighbours:
+        for roll in range(4):
+            seen = tk.rotate_face(c.moved(mv).faces[watched], roll)
+            found = tk.best_match(c, seen)
+            neighbour_ok &= found.move == mv and found.confident
+    all_ok &= check(
+        f"all {len(neighbours)} neighbouring-face turns are read correctly",
+        neighbour_ok,
+    )
+
+    # Turning the watched face looks just like turning the whole cube, so
+    # the move the app asked for breaks the tie.
+    seen = tk.rotate_face(c.moved(watched).faces[watched], 0)
+    all_ok &= check(
+        "turning the watched face needs the expected move to disambiguate",
+        tk.best_match(c, seen).move == ""
+        and tk.best_match(c, seen, expected=watched).move == watched,
+    )
+
+    hidden = OPPOSITE[watched]
+    seen = tk.rotate_face(c.moved(hidden).faces[watched], 0)
+    all_ok &= check(
+        "a turn of the face at the back is reported as unseen, not guessed",
+        tk.is_hidden(watched, hidden)
+        and tk.best_match(c, seen, expected=hidden).move == "",
+    )
+
+    noisy = tk.rotate_face(c.moved("U").faces[watched], 1)
+    noisy[7] = "W" if noisy[7] != "W" else "G"
+    all_ok &= check("tracker: survives one misread sticker",
+                    tk.best_match(c, noisy).move == "U")
 
     # Solver round-trip (only if a solver backend is installed).
     try:

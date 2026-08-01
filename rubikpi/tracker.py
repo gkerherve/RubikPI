@@ -1,4 +1,4 @@
-"""Follow-along tracking: recognise what the user just did to the cube.
+"""Follow-along tracking from a single face.
 
 Copyright (C) 2026 Gwilherm Kerherve
 
@@ -7,164 +7,136 @@ it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
-During playback the camera keeps reading the three faces it can see.
-Because the app already knows the cube's state, recognising what
-happened is a *matching* problem, not a general vision problem: for every
-one of the 24 ways the cube can be held and every legal move (plus "no
-move at all"), predict the 27 visible stickers and keep the hypothesis
-that fits the camera best.
+The camera watches one face — the easy thing to hold steady — and the app
+already knows the cube's state, so working out what you did is a matching
+problem over nine stickers.
 
-That single search answers both questions at once — whether the cube was
-merely rotated (you turned it round to show the back) or actually
-turned, and which move it was.
+What one face tells you:
+
+* **Which side the camera is on.**  Centres never move, so the middle
+  sticker names the face.
+* **A turn of that face**: all nine stickers rotate.
+* **A turn of any of the four neighbouring faces**: one row or column is
+  replaced, which identifies the face and the direction.
+* **A turn of the opposite face**: nothing changes — genuinely invisible,
+  and reported as such rather than guessed at.
+
+One ambiguity is unavoidable: turning the face you are looking at looks
+exactly like turning the whole cube in your hands.  Passing the move the
+app just asked for as *expected* settles it — if what the camera sees
+fits that move, it counts; otherwise it is read as the cube being turned
+round, which changes nothing.
 
 Pure Python: no Qt, no OpenCV, so it is testable headless.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from rubikpi.cube import ALL_MOVES, Cube
+from rubikpi.cube import ALL_MOVES, FACES, OPPOSITE, Cube, _FACE_CW
 
-#: The 24 orientations of a cube, as rotation sequences from the identity.
-ORIENTATIONS: list[str] = [
-    (spin + " " + tilt).strip()
-    for tilt in ("", "x", "x2", "x'", "z", "z'")
-    for spin in ("", "y", "y2", "y'")
-]
+#: Stickers compared per hypothesis: one face.
+CELLS = 9
 
-#: Faces the camera sees in the canonical corner view (see vision.VIEW_MAPS).
-VISIBLE: tuple[str, str, str] = ("U", "F", "R")
-
-#: Basic rotations, with how they read to someone holding the cube.
-ROTATION_NAMES: list[tuple[str, str]] = [
-    ("y", "turned it left"),
-    ("y'", "turned it right"),
-    ("y2", "turned it half way round"),
-    ("x", "tilted it up"),
-    ("x'", "tilted it down"),
-    ("x2", "flipped it over"),
-    ("z", "rolled it clockwise"),
-    ("z'", "rolled it anticlockwise"),
-]
+#: Human names for the four ways a face can be rotated in view.
+ROLL_NAMES = {0: "", 1: "rolled it clockwise",
+              2: "turned it upside down", 3: "rolled it anticlockwise"}
 
 
-def _orientation_maps() -> list[dict[str, list[tuple[str, int]]]]:
-    """For each orientation, where each visible facelet comes from.
-
-    ``maps[o]["U"][i] == (face, index)`` means: when the cube is held in
-    orientation *o*, the sticker seen at U[i] is the model's
-    ``faces[face][index]``.
-    """
-    maps: list[dict[str, list[tuple[str, int]]]] = []
-    for seq in ORIENTATIONS:
-        probe = Cube(faces={f: [f"{f}{i}" for i in range(9)]
-                            for f in ("U", "R", "F", "D", "L", "B")})
-        probe.apply_sequence(seq)
-        maps.append({
-            face: [(probe.faces[face][i][0], int(probe.faces[face][i][1:]))
-                   for i in range(9)]
-            for face in VISIBLE
-        })
-    return maps
-
-
-ORIENT_MAPS = _orientation_maps()
-
-#: Cells compared per hypothesis (three faces of nine stickers).
-CELLS = 27
+def rotate_face(letters: list[str], quarters: int) -> list[str]:
+    """The same nine stickers seen after turning the face clockwise."""
+    out = list(letters)
+    for _ in range(quarters % 4):
+        out = [out[_FACE_CW[i]] for i in range(9)]
+    return out
 
 
 @dataclass
 class Match:
-    """Best explanation of what the camera is showing."""
+    """What the camera is most likely showing."""
 
-    move: str            # "" when the cube was only rotated
-    orientation: int     # index into ORIENTATIONS
-    score: int           # matching stickers out of 27
-    runner_up: int = 0   # score of the best *different* hypothesis
+    face: str = ""          # the face pointing at the camera
+    move: str = ""          # "" when nothing turned
+    roll: int = 0           # quarter turns the view is rotated by
+    score: int = 0          # matching stickers out of 9
+    ambiguous: bool = False  # several different moves fit equally well
+    options: list[str] = field(default_factory=list)
 
     @property
     def confident(self) -> bool:
-        """At most one odd sticker, and clearly better than the alternative."""
-        return self.score >= CELLS - 1 and self.score > self.runner_up
+        """At most one odd sticker, one face identified, one reading."""
+        return bool(self.face) and self.score >= CELLS - 1 \
+            and not self.ambiguous
 
 
-def predict(cube: Cube, orientation: int) -> dict[str, list[str]]:
-    """The 27 stickers a camera would see for *cube* held that way."""
-    omap = ORIENT_MAPS[orientation]
-    return {face: [cube.faces[f][i] for f, i in omap[face]]
-            for face in VISIBLE}
+def visible_face(cube: Cube, observed: list[str]) -> str:
+    """Which face the camera is looking at, from the centre sticker."""
+    centre = observed[4] if len(observed) == 9 else ""
+    seen = [f for f in FACES if cube.center(f) == centre]
+    return seen[0] if len(seen) == 1 else ""
 
 
-def _score(cube: Cube, orientation: int,
-           observed: dict[str, list[str]]) -> int:
-    omap = ORIENT_MAPS[orientation]
-    hits = 0
-    for face in VISIBLE:
-        seen = observed.get(face)
-        if not seen:
-            continue
-        row = omap[face]
-        faces = cube.faces
-        for i in range(9):
-            f, j = row[i]
-            if faces[f][j] == seen[i]:
-                hits += 1
-    return hits
+def is_hidden(face: str, move: str) -> bool:
+    """Would this move be invisible while looking at *face*?"""
+    return bool(move) and move[0] == OPPOSITE.get(face, "")
 
 
-def best_match(cube: Cube, observed: dict[str, list[str]],
-               moves: list[str] | None = None) -> Match:
-    """Find the (move, orientation) that best explains *observed*.
+def best_match(cube: Cube, observed: list[str],
+               expected: str = "") -> Match:
+    """Explain *observed* as a move (or none) plus how the cube is held.
 
-    ``moves`` defaults to every legal quarter/half turn; "" (no move) is
-    always considered, so a pure rotation is recognised as such.
+    *expected* is the move the app has asked for; when the evidence fits
+    it as well as anything else, it wins — that is what separates
+    "you turned this face" from "you turned the whole cube round".
     """
-    candidates = [""] + list(moves if moves is not None else ALL_MOVES)
-    best = Match(move="", orientation=0, score=-1)
-    second = -1
-    for move in candidates:
+    if len(observed) != CELLS or "X" in observed:
+        return Match()
+    face = visible_face(cube, observed)
+    if not face:
+        return Match()
+
+    best = -1
+    fits: list[tuple[str, int]] = []          # (move, roll) scoring best
+    for move in [""] + list(ALL_MOVES):
         probe = cube if not move else cube.moved(move)
-        for o in range(len(ORIENTATIONS)):
-            s = _score(probe, o, observed)
-            if s > best.score:
-                second = best.score
-                best = Match(move=move, orientation=o, score=s)
-            elif s > second and move != best.move:
-                second = s
-    best.runner_up = max(second, 0)
-    return best
+        for roll in range(4):
+            predicted = rotate_face(probe.faces[face], roll)
+            score = sum(1 for a, b in zip(predicted, observed) if a == b)
+            if score > best:
+                best, fits = score, [(move, roll)]
+            elif score == best:
+                fits.append((move, roll))
+
+    moves = {m for m, _ in fits}
+    # A move on the hidden face explains nothing the camera can see, so it
+    # is never evidence of anything on its own.
+    visible_moves = {m for m in moves if m and not is_hidden(face, m)}
+
+    def pick(move: str) -> Match:
+        roll = next(r for m, r in fits if m == move)
+        return Match(face=face, move=move, roll=roll, score=best,
+                     options=sorted(moves))
+
+    if expected and expected in moves and not is_hidden(face, expected):
+        return pick(expected)
+    if "" in moves:
+        return pick("")
+    if len(visible_moves) == 1:
+        return pick(next(iter(visible_moves)))
+    result = pick(sorted(visible_moves)[0]) if visible_moves else Match()
+    result.ambiguous = True
+    return result
 
 
-def describe_rotation(previous: int, current: int) -> str:
-    """Plain words for how the cube was turned between two orientations."""
-    if previous == current:
+def describe_change(previous: Match | None, current: Match) -> str:
+    """Plain words for how the cube is being held now."""
+    if not current.face:
         return ""
-    prev_seq = ORIENTATIONS[previous]
-    for token, phrase in ROTATION_NAMES:
-        probe = Cube(faces={f: [f] * 9 for f in
-                            ("U", "R", "F", "D", "L", "B")})
-        probe.apply_sequence(f"{prev_seq} {token}".strip())
-        target = Cube(faces={f: [f] * 9 for f in
-                             ("U", "R", "F", "D", "L", "B")})
-        target.apply_sequence(ORIENTATIONS[current])
-        if all(probe.center(f) == target.center(f) for f in probe.faces):
-            return phrase
-    return "turned it round"
-
-
-def facing_face(orientation: int) -> str:
-    """Which face of the cube points at the camera in that orientation."""
-    probe = Cube(faces={f: [f] * 9 for f in
-                        ("U", "R", "F", "D", "L", "B")})
-    probe.apply_sequence(ORIENTATIONS[orientation])
-    return probe.center("F")
-
-
-def facing_description(cube: Cube, orientation: int) -> str:
-    """Name of the face pointing at the camera ("front", "back", ...)."""
-    names = {"F": "front", "B": "back", "U": "top",
-             "D": "bottom", "L": "left", "R": "right"}
-    return names.get(facing_face(orientation), "?")
+    if previous is None or not previous.face:
+        return ""
+    if previous.face != current.face:
+        return "turned the cube round"
+    if previous.roll != current.roll:
+        return ROLL_NAMES.get((current.roll - previous.roll) % 4, "")
+    return ""

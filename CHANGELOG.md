@@ -2,7 +2,30 @@
 
 All notable changes to RubikPI.
 
-## 0.9.0 — 2026-08-01
+## 0.10.0 — 2026-08-01
+
+One face, everywhere.  Corner (3-face) detection is gone.
+
+- Scanning and follow-along both watch **a single face**, which is far
+  easier to hold steady than a corner. The scan-mode choice is gone —
+  there is one way to do it now, six flat-on shots.
+- **Follow-along works from one face**, and gets more out of it than you
+  might expect:
+  - the centre sticker names the face, so the app knows which side the
+    camera is on by itself and keeps "on your right" honest;
+  - turning any of the four neighbouring faces swaps one row or column,
+    which identifies the face *and* the direction;
+  - turning the watched face rotates all nine stickers — indistinguishable
+    from turning the whole cube in your hands, so the move the app just
+    asked for breaks the tie;
+  - turning the face pointing away from the camera changes nothing it can
+    see, so it says "that face is facing away — turn the cube to show it,
+    or press the right arrow" instead of pretending to know.
+- Removed the corner-view machinery: `SCAN_VIEWS`, `VIEW_MAPS`, the
+  hexagon fitting and the 27-sticker sampler.
+- Self-tests rewritten for single-face tracking: face identification from
+  the centre, all 12 neighbouring turns from every rotation, the
+  watched-face tie-break, and the hidden-face case.
 
 You can watch the turns happen, and the camera works out its own side.
 

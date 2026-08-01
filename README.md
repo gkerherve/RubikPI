@@ -22,11 +22,15 @@ possibilities* from wherever you currently stand.
 
 ## Features
 
-- **Camera face recognition** — the cube is located in the frame (contour
-  detection), colours are classified in Lab space and self-calibrate from
-  your own stickers, and steady readings auto-capture. Two scan modes:
-  *corner view* (3 faces at once, whole cube in 2 shots) or the easier
-  *one face at a time* (6 flat-on shots), both with on-screen guides.
+- **Camera face recognition** — one face at a time. The face is located in
+  the frame (contour detection), colours are classified in Lab space and
+  self-calibrate from your own stickers, and steady readings auto-capture.
+  A guided 6-step protocol tells you exactly how to hold the cube.
+- **Follow me** — during a solve the camera keeps watching one face. The
+  centre sticker tells it which side it is looking at, turning that face
+  or any neighbour is recognised automatically, and the solution advances
+  as you go. A turn of the face pointing away from the camera cannot be
+  seen, and it says so instead of guessing.
 - **Phone as camera** — the Camera field takes a device number or a stream
   URL. Use Windows 11's "connected camera" for Android (shows up as an
   extra number), or any IP-camera app (e.g. IP Webcam:

@@ -28,7 +28,7 @@ from rubikpi.cube import (
 from rubikpi.cube_view import CubeViewWidget
 from rubikpi.solution_tree import SolutionTreePanel, move_in_words
 from rubikpi.solver import MODES, Solution, solve
-from rubikpi.tracker import best_match, describe_rotation, facing_face
+from rubikpi.tracker import best_match, describe_change, is_hidden
 
 STYLE = """
 QMainWindow, QWidget { background: #1d2026; color: #d8dce2;
@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         self._solver: SolverWorker | None = None
         #: Follow-along state: last accepted orientation and a small vote
         #: buffer, so one noisy frame cannot advance the solution.
-        self._follow_orient: int | None = None
+        self._follow_match = None
         self._pending_move = ""
         self._pending_votes = 0
 
@@ -230,7 +230,7 @@ class MainWindow(QMainWindow):
         right = COLOR_NAME[DEFAULT_SCHEME[self.holding()["R"]]]
         self._say(f"Camera on the {cam} side, so you are looking at the "
                   f"{you} side — {right} is on your right.")
-        self._follow_orient = None  # re-announce the view next frame
+        self._follow_match = None  # re-announce the view next frame
 
     def _refresh_title(self) -> None:
         mode = self.mode_box.currentText() if hasattr(self, "mode_box") else ""
@@ -378,49 +378,48 @@ class MainWindow(QMainWindow):
             self._say("Start the camera first — Follow me watches the cube.")
             self.btn_follow.setChecked(False)
             return
-        self._follow_orient = None
+        self._follow_match = None
         self._pending_move = ""
         self._pending_votes = 0
         self.camera.set_follow(on)
         if on:
             self.play_timer.stop()
             self.btn_play.setText("▶ Play")
-            self._say("Follow me: make the move shown — hold the cube "
-                      "corner-on so three faces are visible.")
+            self._say("Follow me: show me any one face of the cube and "
+                      "make the move shown in the middle.")
         else:
             self._say("Follow me off.")
 
-    def _on_live_reading(self, faces: dict, stable: bool) -> None:
+    def _on_live_reading(self, grid: list, stable: bool) -> None:
         """Camera frame during follow-along: work out what the user did."""
         if not self.btn_follow.isChecked() or self.solution is None:
             return
-        if not stable or any("X" in v for v in faces.values()):
+        if not stable or "X" in grid:
             return
-        match = best_match(self.cube, faces)
+        expected = (self.solution.moves[self.progress]
+                    if self.progress < len(self.solution.moves) else "")
+        match = best_match(self.cube, list(grid), expected=expected)
         if not match.confident:
+            if match.ambiguous:
+                self._say("Not sure what changed — hold the cube steady, or "
+                          "show me the face you are turning.")
             return
-        # The centre stickers identify each visible face, so the camera's
-        # own view tells us which side it is on — no need to be told.
-        self._sync_camera_face(match.orientation)
+
+        # The centre sticker names the face, so the camera works out its
+        # own side without being told.
+        self._sync_camera_face(match.face)
+        moved_words = describe_change(self._follow_match, match)
+        self._follow_match = match
 
         if match.move == "":
-            # Nothing turned — but the cube may have been rotated.
-            if self._follow_orient is None:
-                self._follow_orient = match.orientation
-                self._say("Tracking — the "
-                          f"{self._colour_at_camera(match.orientation)} side "
-                          "is facing the camera.")
-            elif match.orientation != self._follow_orient:
-                how = describe_rotation(self._follow_orient, match.orientation)
-                shown = self._colour_at_camera(match.orientation)
-                self._follow_orient = match.orientation
-                if self.progress < len(self.solution.moves):
-                    nxt = self.solution.moves[self.progress]
-                    self._say(f"You {how} — the {shown} side now faces the "
-                              f"camera. Next: {nxt}, "
-                              f"{move_in_words(nxt, self.holding())}")
-                else:
-                    self._say(f"You {how}. All done!")
+            seen = COLOR_NAME[self.cube.center(match.face)]
+            if moved_words:
+                self._say(f"You {moved_words} — I can see the {seen} side "
+                          f"now. {self._next_hint()}")
+            elif expected and is_hidden(match.face, expected):
+                self._say(f"{expected} is on the side facing away from me — "
+                          "turn the cube to show it, or press the right "
+                          "arrow when you have done it.")
             self._pending_move = ""
             self._pending_votes = 0
             return
@@ -435,17 +434,21 @@ class MainWindow(QMainWindow):
             return
         self._pending_move = ""
         self._pending_votes = 0
-        self._follow_orient = match.orientation
         self._accept_user_move(match.move)
 
-    def _sync_camera_face(self, orientation: int) -> None:
-        """Point the "Camera sees" setting at whatever the camera really sees.
+    def _next_hint(self) -> str:
+        """One line telling the user what to do next."""
+        if self.solution is None or self.progress >= len(self.solution.moves):
+            return "All done!"
+        nxt = self.solution.moves[self.progress]
+        return f"Next: {nxt}, {move_in_words(nxt, self.holding())}"
 
-        Read straight off the centre pieces: the tracker's orientation
-        says which face is towards the camera, so left and right stay
-        correct even if the user turns the cube right round.
+    def _sync_camera_face(self, face: str) -> None:
+        """Point the "Camera sees" setting at the face the camera can see.
+
+        Read straight off the centre piece, so left and right stay correct
+        however the user turns the cube.
         """
-        face = facing_face(orientation)
         index = self.camera_face.findData(face)
         if index < 0 or index == self.camera_face.currentIndex():
             return  # a top/bottom view, or already right
@@ -453,10 +456,6 @@ class MainWindow(QMainWindow):
         self.camera_face.setCurrentIndex(index)
         self.camera_face.blockSignals(False)
         self.tree_panel.set_holding(self.holding())
-
-    def _colour_at_camera(self, orientation: int) -> str:
-        """Colour of the side pointing at the camera in that orientation."""
-        return COLOR_NAME[self.cube.center(facing_face(orientation))]
 
     def _accept_user_move(self, move: str) -> None:
         """Apply a move the user physically made and re-sync the plan."""
