@@ -33,10 +33,13 @@ class CameraPanel(QWidget):
     scan_reset = pyqtSignal()
     demo_requested = pyqtSignal()
     status = pyqtSignal(str)
+    #: Live corner-view reading for follow-along mode: {face: 9 letters}.
+    live_reading = pyqtSignal(object, bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.worker: CameraWorker | None = None
+        self.follow = False
         self.step_index = 0
         self.captured: dict[str, list[str]] = {}
         self._last_faces: dict[str, list[str]] = {}
@@ -184,9 +187,28 @@ class CameraPanel(QWidget):
         self.stop_camera()
         super().closeEvent(event)
 
+    def set_follow(self, on: bool) -> None:
+        """Follow-along mode: keep reading three faces, never auto-capture."""
+        self.follow = on
+        self.scan_mode.setEnabled(not on)
+        self.btn_capture.setEnabled(not on and self.worker is not None)
+        self._configure_worker_step()
+        if on:
+            self.instruction.setText(
+                "Follow-along: hold the cube corner-on and make the move "
+                "shown in the middle panel — RubikPI watches and keeps up.")
+        else:
+            self._refresh_progress()
+
     def _configure_worker_step(self) -> None:
         """Point the worker at the current mode and step."""
         if self.worker is None:
+            return
+        if self.follow:
+            # Tracking always uses the canonical corner view: three faces
+            # give enough evidence to tell a turn from a rotation.
+            self.worker.set_mode("corner")
+            self.worker.set_view(0)
             return
         steps = self._steps()
         idx = min(self.step_index, len(steps) - 1)
@@ -212,6 +234,9 @@ class CameraPanel(QWidget):
         self._last_raws = dict(raws)
         newly_stable = stable and not self._last_stable
         self._last_stable = stable
+        if self.follow:
+            self.live_reading.emit(dict(faces), stable)
+            return
         if (newly_stable and self.auto_capture.isChecked()
                 and self.step_index < len(self._steps())):
             wrong = self._wrong_centres()

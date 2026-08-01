@@ -2,7 +2,40 @@
 
 All notable changes to RubikPI.
 
-## 0.5.0 — 2026-08-01
+## 0.6.0 — 2026-08-01
+
+Follow-along tracking, plain-English steps, and honest error messages.
+
+- **Follow me** (new button next to Play): the camera watches your cube
+  while you solve it. Turn the cube any way you like — it recognises the
+  rotation and says what you did ("you turned it left — now showing the
+  back face") — and every face turn is matched and ticked off. Make a
+  different move than suggested and it re-solves from where your cube
+  actually is.
+- The tracker matches the 27 visible stickers against all 24 orientations
+  x 19 possibilities (18 moves + no move), so it separates a rotation
+  from a turn. It tolerates one misread sticker and needs two agreeing
+  frames before accepting a move. ~1 ms per frame, no GPU.
+- **Panel 3 is now "What to do"**: a large card shows the next move
+  spelled out ("R' — turn the RIGHT face anticlockwise") with stage and
+  progress, then the numbered steps grouped by stage, each in words.
+  The old move-explorer is folded away behind "What-if explorer",
+  collapsed by default.
+- **Cube validity check**: a scan is now verified against the physics of
+  a real cube (every corner/edge a real piece, corner-twist, edge-flip
+  and permutation parity). Instead of kociemba's "Probably cubestring is
+  invalid" you get "A corner is twisted in place — one corner's three
+  stickers are read in the wrong order."
+- Solver errors are de-duplicated, and `rubik_solver` failing on Python
+  3.12 (it imports the removed `imp` module) is reported as "needs
+  Python 3.11 or older" rather than "not installed"; requirements.txt
+  marks it accordingly.
+- Two-phase (kociemba) solutions are no longer mislabelled with human
+  stage names like "Cross" or "F2L" — they are shown as one
+  "Fewest-moves solution (not layer by layer)" block.
+- New self-tests: solvability accept/reject cases, tracker recognition
+  across all orientations, and a proof that three faces cannot determine
+  a cube (two legal states sharing the same three faces).
 
 Easier scanning: single-face mode is back, and phones can be the camera.
 

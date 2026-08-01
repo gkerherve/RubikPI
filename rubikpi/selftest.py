@@ -120,6 +120,71 @@ def main() -> int:
                 consistent = False
     all_ok &= check("view 2 = view 1 of the cube after y x2", consistent)
 
+    # Solvability check: accepts real states, rejects impossible ones.
+    legal = all(Cube.solved().moved(m).is_solvable()[0] for m in ALL_MOVES)
+    rng2 = random.Random(21)
+    for _ in range(50):
+        probe = Cube.solved()
+        probe.apply_sequence(Cube.random_scramble(rng2.randint(1, 30), rng2))
+        legal &= probe.is_solvable()[0]
+    all_ok &= check("real cube states are accepted", legal)
+
+    twisted = Cube.solved()
+    a, b, d = (twisted.faces["U"][8], twisted.faces["R"][0],
+               twisted.faces["F"][2])
+    twisted.faces["U"][8], twisted.faces["R"][0], twisted.faces["F"][2] = \
+        b, d, a
+    all_ok &= check("a twisted corner is rejected",
+                    not twisted.is_solvable()[0])
+    flipped = Cube.solved()
+    flipped.faces["U"][5], flipped.faces["R"][1] = (flipped.faces["R"][1],
+                                                    flipped.faces["U"][5])
+    all_ok &= check("a flipped edge is rejected", not flipped.is_solvable()[0])
+    swapped = Cube.solved()
+    for (f1, i1), (f2, i2) in ((("U", 5), ("U", 7)), (("R", 1), ("F", 1))):
+        swapped.faces[f1][i1], swapped.faces[f2][i2] = (swapped.faces[f2][i2],
+                                                        swapped.faces[f1][i1])
+    all_ok &= check("two swapped edges are rejected",
+                    not swapped.is_solvable()[0])
+
+    # Follow-along tracker: rotations and turns, from any orientation.
+    from rubikpi import tracker as tk
+
+    c = Cube.solved()
+    c.apply_sequence(Cube.random_scramble(20, random.Random(4)))
+    rot_ok = True
+    for o in range(len(tk.ORIENTATIONS)):
+        m = tk.best_match(c, tk.predict(c, o))
+        rot_ok &= m.move == "" and m.orientation == o and m.confident
+    all_ok &= check("tracker: rotation-only seen in all 24 orientations",
+                    rot_ok)
+    turn_ok = True
+    for mv in ALL_MOVES:
+        turned = c.moved(mv)
+        for o in (0, 7, 13, 22):
+            m = tk.best_match(c, tk.predict(turned, o))
+            turn_ok &= m.move == mv and m.confident
+    all_ok &= check("tracker: every move recognised from any angle", turn_ok)
+    noisy = tk.predict(c.moved("R'"), 7)
+    noisy["U"][3] = "X"
+    all_ok &= check("tracker: survives one misread sticker",
+                    tk.best_match(c, noisy).move == "R'")
+
+    # Three faces genuinely cannot determine the cube: build two legal
+    # states that agree on U, F and R but differ behind.
+    twin = Cube.solved()
+    slots = ((("D", 3), ("L", 7)), (("D", 7), ("B", 7)), (("B", 5), ("L", 3)))
+    vals = {s: [twin.faces[f][i] for f, i in s] for s in slots}
+    for dst, src in zip(slots, (slots[1], slots[2], slots[0])):
+        for (f, i), v in zip(dst, vals[src]):
+            twin.faces[f][i] = v
+    all_ok &= check(
+        "two different legal cubes can share the same three faces",
+        twin.is_solvable()[0]
+        and all(twin.faces[f] == Cube.solved().faces[f] for f in "UFR")
+        and twin.faces != Cube.solved().faces,
+    )
+
     # Solver round-trip (only if a solver backend is installed).
     try:
         from rubikpi.solver import solve

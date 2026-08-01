@@ -23,8 +23,9 @@ from rubikpi import __app_name__, __version__
 from rubikpi.camera_panel import CameraPanel
 from rubikpi.cube import Cube, invert_sequence
 from rubikpi.cube_view import CubeViewWidget
-from rubikpi.solution_tree import SolutionTreePanel
+from rubikpi.solution_tree import SolutionTreePanel, move_in_words
 from rubikpi.solver import MODES, Solution, solve
+from rubikpi.tracker import best_match, describe_rotation, facing_description
 
 STYLE = """
 QMainWindow, QWidget { background: #1d2026; color: #d8dce2;
@@ -35,6 +36,14 @@ QLabel#videoView { background: #14161a; border: 1px solid #30343b;
                    border-radius: 8px; color: #9aa0a8; }
 QLabel#instruction { color: #8fd3a8; font-weight: bold; }
 QLabel#hintLabel { color: #8a9099; font-size: 12px; }
+QLabel#nextMove { color: #e8b93c; font-size: 40px; font-weight: bold; }
+QLabel#nextWords { color: #d8dce2; font-size: 14px; }
+QGroupBox { border: 1px solid #3a3f46; border-radius: 8px; margin-top: 8px;
+            padding-top: 8px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px;
+                   color: #9aa0a8; }
+QPushButton#follow:checked { background: #2f7d4f; border-color: #47a06a;
+                             color: #fff; font-weight: bold; }
 QPushButton { background: #2b2f36; border: 1px solid #3a3f46;
               border-radius: 6px; padding: 6px 10px; }
 QPushButton:hover { background: #343943; }
@@ -78,6 +87,11 @@ class MainWindow(QMainWindow):
         self.progress = 0
         self.scramble: list[str] = []
         self._solver: SolverWorker | None = None
+        #: Follow-along state: last accepted orientation and a small vote
+        #: buffer, so one noisy frame cannot advance the solution.
+        self._follow_orient: int | None = None
+        self._pending_move = ""
+        self._pending_votes = 0
 
         self.play_timer = QTimer(self)
         self.play_timer.setInterval(900)
@@ -101,6 +115,7 @@ class MainWindow(QMainWindow):
         self.camera.scan_reset.connect(self._on_scan_reset)
         self.camera.demo_requested.connect(self._on_demo)
         self.camera.status.connect(self._say)
+        self.camera.live_reading.connect(self._on_live_reading)
         splitter.addWidget(self.camera)
 
         # Middle: cube view + controls.
@@ -137,6 +152,14 @@ class MainWindow(QMainWindow):
         self.btn_next.clicked.connect(self.step_forward)
         for b in (self.btn_first, self.btn_prev, self.btn_play, self.btn_next):
             ctrl.addWidget(b)
+        self.btn_follow = QPushButton("👁 Follow me")
+        self.btn_follow.setObjectName("follow")
+        self.btn_follow.setCheckable(True)
+        self.btn_follow.setToolTip(
+            "Watch the cube through the camera: turn it any way you like and "
+            "RubikPI keeps up, ticking off each move as you make it.")
+        self.btn_follow.toggled.connect(self.toggle_follow)
+        ctrl.addWidget(self.btn_follow)
         mv.addLayout(ctrl)
 
         self.stage_label = QLabel("Scan your cube to begin.")
@@ -176,15 +199,16 @@ class MainWindow(QMainWindow):
         self._sync_views()
 
     def _on_scan_complete(self) -> None:
-        ok, why = self.cube.is_valid_colors()
+        ok, why = self.cube.is_solvable()
         if ok:
-            self._say("Cube captured and colour-checked — press Solve!")
+            self._say("Cube captured and checked — press Solve!")
             self.stage_label.setText("Cube captured ✔ — choose a mode and "
                                      "press Solve.")
         else:
-            self._say(f"Scan finished but looks wrong: {why}")
-            self.stage_label.setText(f"⚠ {why}  Use “Redo previous face” "
-                                     "to fix the bad face.")
+            self._say(f"Scan finished but the cube is impossible: {why}")
+            self.stage_label.setText(
+                f"⚠ Misread scan — {why}  Use “Redo previous step” to "
+                "rescan that part in better light.")
 
     def _on_scan_reset(self) -> None:
         self.cube = Cube.unknown()
@@ -250,6 +274,8 @@ class MainWindow(QMainWindow):
     def _invalidate_solution(self) -> None:
         self.play_timer.stop()
         self.btn_play.setText("▶ Play")
+        if self.btn_follow.isChecked():
+            self.btn_follow.setChecked(False)  # also leaves follow mode
         self.solution = None
         self.progress = 0
 
@@ -283,6 +309,100 @@ class MainWindow(QMainWindow):
             self.cube.apply_sequence(
                 invert_sequence([self.solution.moves[self.progress]]))
         self._sync_views()
+
+    # -- follow-along ---------------------------------------------------------
+
+    #: Frames that must agree before a detected move is accepted.
+    FOLLOW_VOTES = 2
+
+    def toggle_follow(self, on: bool) -> None:
+        if on and self.solution is None:
+            self._say("Solve the cube first, then Follow me can track you.")
+            self.btn_follow.setChecked(False)
+            return
+        if on and self.camera.worker is None:
+            self._say("Start the camera first — Follow me watches the cube.")
+            self.btn_follow.setChecked(False)
+            return
+        self._follow_orient = None
+        self._pending_move = ""
+        self._pending_votes = 0
+        self.camera.set_follow(on)
+        if on:
+            self.play_timer.stop()
+            self.btn_play.setText("▶ Play")
+            self._say("Follow me: make the move shown — hold the cube "
+                      "corner-on so three faces are visible.")
+        else:
+            self._say("Follow me off.")
+
+    def _on_live_reading(self, faces: dict, stable: bool) -> None:
+        """Camera frame during follow-along: work out what the user did."""
+        if not self.btn_follow.isChecked() or self.solution is None:
+            return
+        if not stable or any("X" in v for v in faces.values()):
+            return
+        match = best_match(self.cube, faces)
+        if not match.confident:
+            return
+
+        if match.move == "":
+            # Nothing turned — but the cube may have been rotated.
+            if self._follow_orient is None:
+                self._follow_orient = match.orientation
+                self._say(f"Tracking — you are showing me the "
+                          f"{facing_description(self.cube, match.orientation)}"
+                          " face.")
+            elif match.orientation != self._follow_orient:
+                how = describe_rotation(self._follow_orient, match.orientation)
+                where = facing_description(self.cube, match.orientation)
+                self._follow_orient = match.orientation
+                if self.progress < len(self.solution.moves):
+                    nxt = self.solution.moves[self.progress]
+                    self._say(f"You {how} — now showing the {where} face. "
+                              f"Next move: {nxt} ({move_in_words(nxt)})")
+                else:
+                    self._say(f"You {how}. All done!")
+            self._pending_move = ""
+            self._pending_votes = 0
+            return
+
+        # A face was turned: require agreement across a couple of frames.
+        if match.move != self._pending_move:
+            self._pending_move = match.move
+            self._pending_votes = 1
+            return
+        self._pending_votes += 1
+        if self._pending_votes < self.FOLLOW_VOTES:
+            return
+        self._pending_move = ""
+        self._pending_votes = 0
+        self._follow_orient = match.orientation
+        self._accept_user_move(match.move)
+
+    def _accept_user_move(self, move: str) -> None:
+        """Apply a move the user physically made and re-sync the plan."""
+        expected = (self.solution.moves[self.progress]
+                    if self.solution and self.progress < len(self.solution.moves)
+                    else "")
+        self.cube.apply(move)
+        if move == expected:
+            self.progress += 1
+            done = self.progress >= len(self.solution.moves)
+            self._sync_views(highlight_move=move)
+            if done:
+                self._say("🎉 That was the last move — solved!")
+            else:
+                nxt = self.solution.moves[self.progress]
+                self._say(f"✔ {move} done. Next: {nxt} — {move_in_words(nxt)}")
+            return
+        # Off-script: re-solve from where the cube actually is now.
+        self._say(f"You turned {move}, not {expected or '—'} — "
+                  "recalculating from where your cube is now…")
+        self.solution = None
+        self.progress = 0
+        self._sync_views()
+        self.solve_now()
 
     def toggle_play(self) -> None:
         if self.play_timer.isActive():

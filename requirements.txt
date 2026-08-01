@@ -1,6 +1,9 @@
 PyQt6>=6.5
 opencv-python>=4.8
 numpy>=1.24
-# Optional solver backends (recommended):
-rubik-solver>=0.2.0
+# Solver backend (recommended — gives the fewest-move solutions):
 kociemba>=1.2
+# Optional: human layer-by-layer methods for Beginner / CFOP modes.
+# rubik-solver 0.2.0 imports the `imp` module, removed in Python 3.12,
+# so it only works on Python 3.11 or older.
+rubik-solver>=0.2.0; python_version < "3.12"

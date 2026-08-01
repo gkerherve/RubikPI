@@ -141,9 +141,13 @@ def solve(cube: Cube, mode: str = "beginner") -> Solution:
     """Solve *cube* with the requested mode, returning moves + stages."""
     if cube.is_solved():
         return Solution(backend="none needed", mode=mode)
-    ok, why = cube.is_valid_colors()
+    # Check the state is physically possible *before* asking a backend:
+    # kociemba would only answer "cubestring is invalid", which tells the
+    # user nothing about which sticker to look at.
+    ok, why = cube.is_solvable()
     if not ok:
-        return Solution(mode=mode, error=why)
+        return Solution(mode=mode, error=f"The scan cannot be a real cube. "
+                                         f"{why}")
 
     attempts: list[tuple[str, str]] = {
         "beginner": [("rubik_solver", "Beginner"), ("kociemba", "")],
@@ -170,16 +174,30 @@ def solve(cube: Cube, mode: str = "beginner") -> Solution:
                 errors.append(f"{name}: produced a non-solving sequence")
                 continue
             sol = Solution(moves=moves, backend=name, mode=mode)
-            sol.stages = segment_stages(cube, moves, mode)
+            sol.stages = segment_stages(cube, moves, mode, name)
             return sol
-        except ImportError:
-            errors.append(f"{backend}: not installed")
+        except ImportError as exc:
+            # rubik_solver 0.2.0 imports the `imp` module, which Python 3.12
+            # removed — that is a version problem, not a missing package.
+            if "imp" in str(exc):
+                errors.append(f"{backend}: needs Python 3.11 or older")
+            else:
+                errors.append(f"{backend}: not installed")
         except Exception as exc:  # noqa: BLE001 - report to the UI
             errors.append(f"{backend}: {exc}")
 
-    hint = ("Install a solver backend with:  "
-            "pip install rubik-solver kociemba")
-    return Solution(mode=mode, error="; ".join(errors) + f".  {hint}")
+    # De-duplicate: the same backend is tried several times per mode, and
+    # repeating "not installed" three times helps nobody.
+    seen: list[str] = []
+    for e in errors:
+        if e not in seen:
+            seen.append(e)
+    missing = [e.split(":")[0] for e in seen if e.endswith("not installed")]
+    if len(missing) == len(seen):
+        return Solution(mode=mode, error=(
+            f"No solver installed for this mode ({', '.join(missing)} "
+            f"missing).  Install one with:  pip install rubik-solver kociemba"))
+    return Solution(mode=mode, error="; ".join(seen))
 
 
 def _normalise(moves: list[str]) -> list[str]:
@@ -201,16 +219,19 @@ def _normalise(moves: list[str]) -> list[str]:
 # Stage segmentation
 # ---------------------------------------------------------------------------
 
-def segment_stages(cube: Cube, moves: list[str], mode: str) -> list[Stage]:
+def segment_stages(cube: Cube, moves: list[str], mode: str,
+                   backend: str = "") -> list[Stage]:
     """Split *moves* into human stages by replaying them on a copy.
 
-    Works for layer-by-layer style solutions; if the stages do not complete
-    in order (e.g. a Kociemba solution), everything is grouped into a single
-    "Solution" stage.
+    Only layer-by-layer solutions have real stages.  A two-phase
+    (Kociemba) solution scrambles and reassembles the cube in a way no
+    human method follows, so labelling parts of it "Cross" or "F2L" would
+    be a lie — it is reported as one block instead.
     """
     stage_defs = CFOP_STAGES if mode == "cfop" else BEGINNER_STAGES
-    if mode == "speed":
-        return [Stage("Solution (two-phase)", list(moves), 0)]
+    if mode == "speed" or backend.startswith("kociemba"):
+        return [Stage("Fewest-moves solution (not layer by layer)",
+                      list(moves), 0)]
 
     # The cross face is whichever of U/D completes its cross first: trying
     # only one can latch onto the *other* face's cross forming late in the

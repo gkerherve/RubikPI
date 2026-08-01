@@ -86,6 +86,30 @@ _SIDE_CYCLES: dict[str, list[tuple[tuple[str, int], ...]]] = {
 #: Clockwise rotation of the face's own 9 stickers: new[i] = old[_FACE_CW[i]].
 _FACE_CW = (6, 3, 0, 7, 4, 1, 8, 5, 2)
 
+# Corner and edge facelet slots (Kociemba convention).  Corners list their
+# facelets clockwise starting with the U/D one; edges start with the
+# reference facelet.  Used by is_solvable() to check that a scanned state
+# is a physically possible cube.
+_CORNER_SLOTS: tuple[tuple[tuple[str, int], ...], ...] = (
+    (("U", 8), ("R", 0), ("F", 2)),   # URF
+    (("U", 6), ("F", 0), ("L", 2)),   # UFL
+    (("U", 0), ("L", 0), ("B", 2)),   # ULB
+    (("U", 2), ("B", 0), ("R", 2)),   # UBR
+    (("D", 2), ("F", 8), ("R", 6)),   # DFR
+    (("D", 0), ("L", 8), ("F", 6)),   # DLF
+    (("D", 6), ("B", 8), ("L", 6)),   # DBL
+    (("D", 8), ("R", 8), ("B", 6)),   # DRB
+)
+
+_EDGE_SLOTS: tuple[tuple[tuple[str, int], ...], ...] = (
+    (("U", 5), ("R", 1)), (("U", 7), ("F", 1)),
+    (("U", 3), ("L", 1)), (("U", 1), ("B", 1)),
+    (("D", 5), ("R", 7)), (("D", 1), ("F", 7)),
+    (("D", 3), ("L", 7)), (("D", 7), ("B", 7)),
+    (("F", 5), ("R", 3)), (("F", 3), ("L", 5)),
+    (("B", 5), ("L", 3)), (("B", 3), ("R", 5)),
+)
+
 #: Compound moves expressed with the primitives above.
 _COMPOUND: dict[str, str] = {
     "x": "R M' L'", "y": "U E' D'", "z": "F S B'",
@@ -162,6 +186,82 @@ class Cube:
         bad = [c for c, n in counts.items() if n != 9]
         if bad:
             return False, "Colour count is off for: " + ", ".join(sorted(bad))
+        return True, "ok"
+
+    def is_solvable(self) -> tuple[bool, str]:
+        """Full physical check: could this state exist on a real cube?
+
+        Beyond colour counts this verifies that every corner and edge slot
+        holds a real piece, that no piece appears twice, and the three
+        classic invariants (corner twist, edge flip, permutation parity).
+        A scan that fails here has at least one misread sticker — the
+        message names the slots to look at.
+        """
+        ok, why = self.is_valid_colors()
+        if not ok:
+            return False, why
+
+        scheme = self.color_scheme()             # face -> colour
+        face_of = {c: f for f, c in scheme.items()}
+        ud = {scheme["U"], scheme["D"]}
+        fb = {scheme["F"], scheme["B"]}
+
+        def slot_name(slot) -> str:
+            return "".join(f for f, _ in slot)
+
+        # -- corners: real piece, right twist, no duplicates ----------------
+        solved_corners = {frozenset(face_of[c] for c in
+                                    (scheme[f] for f, _ in slot)): i
+                          for i, slot in enumerate(_CORNER_SLOTS)}
+        corner_perm: list[int] = []
+        twist = 0
+        for slot in _CORNER_SLOTS:
+            colors = [self.faces[f][i] for f, i in slot]
+            key = frozenset(face_of.get(c, "?") for c in colors)
+            if len(set(colors)) != 3 or key not in solved_corners:
+                return False, (f"Corner {slot_name(slot)} is not a real "
+                               "cube corner — recheck those three stickers.")
+            corner_perm.append(solved_corners[key])
+            oriented = [j for j, c in enumerate(colors) if c in ud]
+            if len(oriented) != 1:
+                return False, (f"Corner {slot_name(slot)} has no single "
+                               "white/yellow sticker — recheck it.")
+            twist += oriented[0]
+        if len(set(corner_perm)) != 8:
+            return False, ("The same corner piece appears twice — at least "
+                           "one corner is misread.")
+        if twist % 3:
+            return False, ("A corner is twisted in place — one corner's "
+                           "three stickers are read in the wrong order.")
+
+        # -- edges: real piece, right flip, no duplicates -------------------
+        solved_edges = {frozenset(face_of[c] for c in
+                                  (scheme[f] for f, _ in slot)): i
+                        for i, slot in enumerate(_EDGE_SLOTS)}
+        edge_perm: list[int] = []
+        flip = 0
+        for slot in _EDGE_SLOTS:
+            colors = [self.faces[f][i] for f, i in slot]
+            key = frozenset(face_of.get(c, "?") for c in colors)
+            if len(set(colors)) != 2 or key not in solved_edges:
+                return False, (f"Edge {slot_name(slot)} is not a real cube "
+                               "edge — recheck those two stickers.")
+            edge_perm.append(solved_edges[key])
+            ref, other = colors
+            if ref in ud:
+                pass
+            elif other in ud or ref not in fb:
+                flip += 1
+        if len(set(edge_perm)) != 12:
+            return False, ("The same edge piece appears twice — at least "
+                           "one edge is misread.")
+        if flip % 2:
+            return False, ("An edge is flipped in place — one edge's two "
+                           "stickers are swapped.")
+
+        if _perm_parity(corner_perm) != _perm_parity(edge_perm):
+            return False, ("Two pieces are swapped — this state cannot be "
+                           "reached by turning a real cube.")
         return True, "ok"
 
     # -- moves ---------------------------------------------------------------
@@ -254,6 +354,23 @@ class Cube:
     def from_serialised(cls, data: str) -> "Cube":
         faces = {f: list(data[i * 9:(i + 1) * 9]) for i, f in enumerate(FACES)}
         return cls(faces=faces)
+
+
+def _perm_parity(perm: list[int]) -> int:
+    """0 for an even permutation, 1 for an odd one."""
+    seen = [False] * len(perm)
+    parity = 0
+    for i in range(len(perm)):
+        if seen[i]:
+            continue
+        length = 0
+        j = i
+        while not seen[j]:
+            seen[j] = True
+            j = perm[j]
+            length += 1
+        parity ^= (length - 1) & 1
+    return parity
 
 
 def _invert(token: str) -> str:
