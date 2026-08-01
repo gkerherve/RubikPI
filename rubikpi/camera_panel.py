@@ -13,15 +13,15 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-    QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
 from rubikpi.vision import (
-    COLOR_NAME, EXPECTED_CENTER, SCAN_VIEWS, CameraWorker,
+    COLOR_NAME, EXPECTED_CENTER, SCAN_STEPS, SCAN_VIEWS, CameraWorker,
 )
 
-#: All six faces in scan order (view 1 then view 2).
+#: All six faces in corner-view order, used for the progress chips.
 ALL_FACES: list[str] = [f for faces, _ in SCAN_VIEWS for f in faces]
 
 
@@ -37,13 +37,30 @@ class CameraPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.worker: CameraWorker | None = None
-        self.view_index = 0
+        self.step_index = 0
         self.captured: dict[str, list[str]] = {}
         self._last_faces: dict[str, list[str]] = {}
         self._last_raws: dict[str, list[tuple[float, float, float]]] = {}
         self._last_stable = False
         self._build_ui()
         self._refresh_progress()
+
+    # -- protocol helpers ----------------------------------------------------
+
+    @property
+    def single_mode(self) -> bool:
+        return self.scan_mode.currentIndex() == 1
+
+    def _steps(self) -> list[tuple[tuple[str, ...], str]]:
+        """Current protocol as (faces-in-step, instruction) tuples."""
+        if self.single_mode:
+            return [((face,), instr) for face, instr in SCAN_STEPS]
+        return [(faces, instr) for faces, instr in SCAN_VIEWS]
+
+    def _step_letters(self, face: str) -> list[str] | None:
+        """The last-seen 9 letters for *face* in the current step."""
+        key = "single" if self.single_mode else face
+        return self._last_faces.get(key)
 
     # -- UI ------------------------------------------------------------------
 
@@ -82,20 +99,39 @@ class CameraPanel(QWidget):
         chips.addStretch(1)
         lay.addLayout(chips)
 
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Scan mode"))
+        self.scan_mode = QComboBox()
+        self.scan_mode.addItems([
+            "Corner view — 3 faces, 2 shots",
+            "One face at a time — 6 shots (easier)",
+        ])
+        self.scan_mode.currentIndexChanged.connect(self._on_mode_changed)
+        mode_row.addWidget(self.scan_mode, stretch=1)
+        lay.addLayout(mode_row)
+
         grid = QGridLayout()
         self.btn_start = QPushButton("Start camera")
         self.btn_start.clicked.connect(self.toggle_camera)
         grid.addWidget(self.btn_start, 0, 0)
 
         cam_row = QHBoxLayout()
-        cam_row.addWidget(QLabel("Camera #"))
-        self.cam_index = QSpinBox()
-        self.cam_index.setRange(0, 8)
-        cam_row.addWidget(self.cam_index)
-        cam_row.addStretch(1)
+        cam_row.addWidget(QLabel("Camera"))
+        self.cam_source = QLineEdit("0")
+        self.cam_source.setPlaceholderText("0, 1, … or http://phone:8080/video")
+        self.cam_source.setToolTip(
+            "A camera number (0 is the default webcam) or a stream URL.\n"
+            "Phone as camera:\n"
+            "  • Windows 11 + Android: Settings > Bluetooth & devices >\n"
+            "    Mobile devices > use phone as connected camera, then try 1 "
+            "or 2 here.\n"
+            "  • Any phone: run the ‘IP Webcam’ app and enter its URL, e.g.\n"
+            "    http://192.168.1.23:8080/video\n"
+            "  • Iriun / DroidCam / Camo appear as an extra camera number.")
+        cam_row.addWidget(self.cam_source, stretch=1)
         grid.addLayout(cam_row, 0, 1)
 
-        self.btn_capture = QPushButton("Capture view (Space)")
+        self.btn_capture = QPushButton("Capture (Space)")
         self.btn_capture.clicked.connect(self.capture_now)
         self.btn_capture.setEnabled(False)
         grid.addWidget(self.btn_capture, 1, 0)
@@ -104,7 +140,7 @@ class CameraPanel(QWidget):
         self.auto_capture.setChecked(True)
         grid.addWidget(self.auto_capture, 1, 1)
 
-        self.btn_redo = QPushButton("Redo previous view")
+        self.btn_redo = QPushButton("Redo previous step")
         self.btn_redo.clicked.connect(self.redo_previous)
         grid.addWidget(self.btn_redo, 2, 0)
 
@@ -127,14 +163,14 @@ class CameraPanel(QWidget):
         if self.worker is not None:
             self.stop_camera()
             return
-        self.worker = CameraWorker(self.cam_index.value(), self)
+        self.worker = CameraWorker(self.cam_source.text(), self)
         self.worker.frame_ready.connect(self._on_frame)
         self.worker.camera_error.connect(self._on_camera_error)
-        self.worker.set_view(self.view_index if self.view_index < 2 else 0)
+        self._configure_worker_step()
         self.worker.start()
         self.btn_start.setText("Stop camera")
         self.btn_capture.setEnabled(True)
-        self.status.emit("Camera started — show the cube corner-on.")
+        self.status.emit("Camera started — follow the on-screen guide.")
         self._refresh_progress()
 
     def stop_camera(self) -> None:
@@ -147,6 +183,22 @@ class CameraPanel(QWidget):
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         self.stop_camera()
         super().closeEvent(event)
+
+    def _configure_worker_step(self) -> None:
+        """Point the worker at the current mode and step."""
+        if self.worker is None:
+            return
+        steps = self._steps()
+        idx = min(self.step_index, len(steps) - 1)
+        if self.single_mode:
+            self.worker.set_mode("single")
+            self.worker.set_single_face(steps[idx][0][0])
+        else:
+            self.worker.set_mode("corner")
+            self.worker.set_view(idx)
+
+    def _on_mode_changed(self) -> None:
+        self.reset_scan()
 
     # -- frame handling ------------------------------------------------------
 
@@ -161,7 +213,7 @@ class CameraPanel(QWidget):
         newly_stable = stable and not self._last_stable
         self._last_stable = stable
         if (newly_stable and self.auto_capture.isChecked()
-                and self.view_index < len(SCAN_VIEWS)):
+                and self.step_index < len(self._steps())):
             wrong = self._wrong_centres()
             if not wrong:
                 self.capture_now()
@@ -177,10 +229,10 @@ class CameraPanel(QWidget):
     def _wrong_centres(self) -> list[tuple[str, str]]:
         """(face, seen-colour) for every visible centre that mismatches."""
         wrong = []
-        for face in SCAN_VIEWS[self.view_index][0]:
-            got = self._last_faces.get(face, ["X"] * 9)[4]
-            if got != EXPECTED_CENTER[face]:
-                wrong.append((face, got))
+        for face in self._steps()[self.step_index][0]:
+            letters = self._step_letters(face) or ["X"] * 9
+            if letters[4] != EXPECTED_CENTER[face]:
+                wrong.append((face, letters[4]))
         return wrong
 
     def _on_camera_error(self, message: str) -> None:
@@ -191,60 +243,59 @@ class CameraPanel(QWidget):
     # -- scan flow -----------------------------------------------------------
 
     def capture_now(self) -> None:
-        if self.view_index >= len(SCAN_VIEWS) or not self._last_faces:
+        steps = self._steps()
+        if self.step_index >= len(steps) or not self._last_faces:
             return
-        view_faces = SCAN_VIEWS[self.view_index][0]
-        if any("X" in self._last_faces.get(f, ["X"]) for f in view_faces):
-            self.status.emit("No cube detected — hold the cube corner-on "
-                             "inside the guide, close to the camera.")
+        step_faces = steps[self.step_index][0]
+        if any("X" in (self._step_letters(f) or ["X"]) for f in step_faces):
+            self.status.emit("No cube detected — hold the cube inside the "
+                             "guide, close to the camera.")
             return
-        for face in view_faces:
-            colors = list(self._last_faces[face])
-            # The protocol fixes which centres this view shows: feed the
+        for face in step_faces:
+            colors = list(self._step_letters(face))
+            # The protocol fixes which centres this step shows: feed the
             # measured colour back so the remaining faces classify against
             # this cube's real stickers under this lighting.
-            if (self.worker is not None and face in self._last_raws
+            raw_key = "single" if self.single_mode else face
+            if (self.worker is not None and raw_key in self._last_raws
                     and colors[4] == EXPECTED_CENTER[face]):
                 self.worker.learn_center(EXPECTED_CENTER[face],
-                                         self._last_raws[face][4])
+                                         self._last_raws[raw_key][4])
             self.captured[face] = colors
             self.face_captured.emit(face, colors)
-        self.view_index += 1
-        if self.worker is not None:
-            self.worker.set_view(min(self.view_index, len(SCAN_VIEWS) - 1))
+        self.step_index += 1
+        self._configure_worker_step()
         self._refresh_progress()
-        if self.view_index >= len(SCAN_VIEWS):
+        if self.step_index >= len(steps):
             self.status.emit("All 6 faces captured!")
             self.scan_complete.emit()
         else:
-            _, instr = SCAN_VIEWS[self.view_index]
-            self.status.emit(f"View captured ({', '.join(view_faces)}) — "
+            _, instr = steps[self.step_index]
+            self.status.emit(f"Captured {', '.join(step_faces)} — "
                              f"now: {instr}")
 
     def redo_previous(self) -> None:
-        if self.view_index == 0:
+        if self.step_index == 0:
             return
-        self.view_index -= 1
-        for face in SCAN_VIEWS[self.view_index][0]:
+        self.step_index -= 1
+        faces = self._steps()[self.step_index][0]
+        for face in faces:
             self.captured.pop(face, None)
-        if self.worker is not None:
-            self.worker.set_view(self.view_index)
+        self._configure_worker_step()
         self._refresh_progress()
-        faces = ", ".join(SCAN_VIEWS[self.view_index][0])
-        self.status.emit(f"Rescanning view {self.view_index + 1} ({faces}).")
+        self.status.emit(f"Rescanning {', '.join(faces)}.")
 
     def reset_scan(self) -> None:
-        self.view_index = 0
+        self.step_index = 0
         self.captured.clear()
-        if self.worker is not None:
-            self.worker.set_view(0)
+        self._configure_worker_step()
         self._refresh_progress()
         self.scan_reset.emit()
-        self.status.emit("Scan reset — show WHITE on top, corner-on.")
+        self.status.emit("Scan reset — follow the on-screen guide.")
 
     def mark_demo(self) -> None:
         """Called when a demo scramble replaces the scan."""
-        self.view_index = len(SCAN_VIEWS)
+        self.step_index = len(self._steps())
         for face in ALL_FACES:
             self.captured[face] = ["?"] * 9
         self._refresh_progress()
@@ -252,8 +303,9 @@ class CameraPanel(QWidget):
     # -- cosmetics -----------------------------------------------------------
 
     def _refresh_progress(self) -> None:
-        current = (SCAN_VIEWS[self.view_index][0]
-                   if self.view_index < len(SCAN_VIEWS) else ())
+        steps = self._steps()
+        current = (steps[self.step_index][0]
+                   if self.step_index < len(steps) else ())
         for face in ALL_FACES:
             chip = self.chips[face]
             if face in self.captured:
@@ -267,10 +319,10 @@ class CameraPanel(QWidget):
             else:
                 chip.setStyleSheet(
                     "background:#3a3f46;color:#9aa0a8;border-radius:6px;")
-        if self.view_index < len(SCAN_VIEWS):
-            faces, instr = SCAN_VIEWS[self.view_index]
+        if self.step_index < len(steps):
+            faces, instr = steps[self.step_index]
             self.instruction.setText(
-                f"View {self.view_index + 1}/2 — faces "
+                f"Step {self.step_index + 1}/{len(steps)} — "
                 f"{'/'.join(faces)}:  {instr}")
         else:
             self.instruction.setText("Scan complete ✔ — cube captured. "

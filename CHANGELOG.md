@@ -2,7 +2,25 @@
 
 All notable changes to RubikPI.
 
-## 0.4.0 — 2026-08-01
+## 0.5.0 — 2026-08-01
+
+Easier scanning: single-face mode is back, and phones can be the camera.
+
+- New "Scan mode" choice: *Corner view — 3 faces, 2 shots* or *One face
+  at a time — 6 shots (easier)*. Single-face mode keeps every
+  improvement (cube localisation, Lab self-calibration, centre checks)
+  and shows the expected-centre badge above the grid.
+- The Camera field now accepts a device number **or a stream URL**, so a
+  phone can be the camera: Windows 11 "connected camera" (Android shows
+  up as an extra number), IP-camera apps
+  (`http://PHONE-IP:8080/video`), or Iriun/DroidCam/Camo virtual
+  webcams. The tooltip explains each option.
+- Colour-aware edge detection (union of per-channel Canny): dark blue
+  and red stickers on dark backgrounds no longer vanish from the
+  detector — found by the synthetic-render test, which now covers all
+  six flat faces plus both corner views.
+- Single-face sampling runs on the true (unmirrored) frame, mapping
+  grids 1:1 onto facelets with no mirror bookkeeping.
 
 Corner-view scanning: three faces at once, whole cube in two captures.
 

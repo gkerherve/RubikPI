@@ -22,9 +22,15 @@ possibilities* from wherever you currently stand.
 
 ## Features
 
-- **Camera face recognition** — a 3x3 grid overlay with per-sticker colour
-  detection (HSV) and auto-capture once the reading is steady. A guided
-  6-step protocol tells you exactly how to hold the cube for each face.
+- **Camera face recognition** — the cube is located in the frame (contour
+  detection), colours are classified in Lab space and self-calibrate from
+  your own stickers, and steady readings auto-capture. Two scan modes:
+  *corner view* (3 faces at once, whole cube in 2 shots) or the easier
+  *one face at a time* (6 flat-on shots), both with on-screen guides.
+- **Phone as camera** — the Camera field takes a device number or a stream
+  URL. Use Windows 11's "connected camera" for Android (shows up as an
+  extra number), or any IP-camera app (e.g. IP Webcam:
+  `http://PHONE-IP:8080/video`), or Iriun/DroidCam/Camo virtual webcams.
 - **Live cube view** — an isometric 3-face view plus the full unfolded net;
   every scanned face and every played move updates it instantly.
 - **Solving modes**

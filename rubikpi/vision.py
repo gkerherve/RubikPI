@@ -39,6 +39,18 @@ SCAN_VIEWS: list[tuple[tuple[str, str, str], str]] = [
      "panels shown by the guide."),
 ]
 
+#: Easy-mode protocol: one flat-on face per step, (face, instruction).
+#: Holding white on top / green towards you, every captured grid maps
+#: 1:1 onto the face's sticker indices — no mental rotation needed.
+SCAN_STEPS: list[tuple[str, str]] = [
+    ("F", "Show the GREEN centre face, WHITE centre on top."),
+    ("R", "Turn the cube LEFT (y): show the RED centre, white still on top."),
+    ("B", "Turn LEFT again: show the BLUE centre, white still on top."),
+    ("L", "Turn LEFT again: show the ORANGE centre, white still on top."),
+    ("U", "Back to green in front, then TILT the cube DOWN: white faces you."),
+    ("D", "From green in front, TILT the cube UP: yellow faces you."),
+]
+
 #: Centre sticker each face must show (standard colour scheme).
 EXPECTED_CENTER: dict[str, str] = {
     "U": "W", "F": "G", "R": "R", "D": "Y", "L": "O", "B": "B",
@@ -122,18 +134,34 @@ class CameraWorker(QThread):
     #: Frames a lost cube position is kept before detection resets.
     KEEP_LOST = 12
 
-    def __init__(self, camera_index: int = 0, parent=None) -> None:
+    def __init__(self, camera_source: str = "0", parent=None) -> None:
         super().__init__(parent)
-        self.camera_index = camera_index
+        #: A device number ("0", "1", ...) or a stream URL — e.g. a phone
+        #: running IP Webcam exposes http://PHONE-IP:8080/video.
+        self.camera_source = str(camera_source)
         self._running = False
+        self._mode = "corner"      # "corner" (3 faces) or "single" (1 face)
         self._view = 0
+        self._single_face = "F"
         self._last_key: str = ""
         self._stable_count = 0
         self._refs: dict[str, tuple[float, float, float]] | None = None
 
+    def set_mode(self, mode: str) -> None:
+        """Switch between "corner" (3 faces at once) and "single" scanning."""
+        self._mode = mode if mode in ("corner", "single") else "corner"
+        self._stable_count = 0
+        self._last_key = ""
+
     def set_view(self, index: int) -> None:
-        """Select which scan view (0 or 1) is being captured."""
+        """Select which corner view (0 or 1) is being captured."""
         self._view = max(0, min(index, len(VIEW_MAPS) - 1))
+        self._stable_count = 0
+        self._last_key = ""
+
+    def set_single_face(self, face: str) -> None:
+        """Tell the worker which face the single-face protocol expects."""
+        self._single_face = face
         self._stable_count = 0
         self._last_key = ""
 
@@ -168,11 +196,14 @@ class CameraWorker(QThread):
             )
             return
 
-        cap = cv2.VideoCapture(self.camera_index)
+        src = self.camera_source.strip()
+        cap = cv2.VideoCapture(int(src) if src.isdigit() else src)
         if not cap.isOpened():
             self.camera_error.emit(
-                f"Could not open camera #{self.camera_index}.\n"
-                "Pick another index or use a Demo scramble instead."
+                f"Could not open camera '{src}'.\n"
+                "Pick another index, enter a stream URL such as\n"
+                "http://PHONE-IP:8080/video (IP Webcam app),\n"
+                "or use a Demo scramble instead."
             )
             return
 
@@ -180,8 +211,9 @@ class CameraWorker(QThread):
             self._refs = self._default_refs(cv2, np)
 
         self._running = True
-        hexa: tuple[float, float, float] | None = None  # smoothed cx, cy, e
+        geom: tuple[float, float, float] | None = None  # smoothed geometry
         lost = 0
+        last_mode = self._mode
         while self._running:
             ok, frame = cap.read()
             if not ok:
@@ -190,27 +222,44 @@ class CameraWorker(QThread):
             # The frame stays in *true* (unmirrored) orientation for all
             # detection and sampling; only the displayed image is flipped.
             h, w = frame.shape[:2]
+            single = self._mode == "single"
+            if self._mode != last_mode:
+                geom, lost, last_mode = None, 0, self._mode
 
-            found = self._find_cube(cv2, np, frame)
+            if single:
+                found = self._find_flat(cv2, np, frame)
+            else:
+                found = self._find_cube(cv2, np, frame)
             if found is not None:
-                hexa = found if hexa is None else tuple(
-                    0.35 * n + 0.65 * o for n, o in zip(found, hexa))
+                geom = found if geom is None else tuple(
+                    0.35 * n + 0.65 * o for n, o in zip(found, geom))
                 lost = 0
-            elif hexa is not None:
+            elif geom is not None:
                 lost += 1
                 if lost > self.KEEP_LOST:
-                    hexa = None
+                    geom = None
 
-            vmap = VIEW_MAPS[self._view]
-            if hexa is not None:
-                faces, raws = self._sample_view(cv2, np, frame, hexa,
-                                                self._refs, vmap)
+            if single:
+                if geom is not None:
+                    letters, labs = self._sample_flat(cv2, np, frame, geom,
+                                                      self._refs)
+                else:
+                    letters = ["X"] * 9
+                    labs = [(0.0, 128.0, 128.0)] * 9
+                faces = {"single": letters}
+                raws = {"single": labs}
+                key = "".join(letters)
             else:
-                faces = {f: ["X"] * 9 for f, _ in vmap.values()}
-                raws = {f: [(0.0, 128.0, 128.0)] * 9
-                        for f, _ in vmap.values()}
+                vmap = VIEW_MAPS[self._view]
+                if geom is not None:
+                    faces, raws = self._sample_view(cv2, np, frame, geom,
+                                                    self._refs, vmap)
+                else:
+                    faces = {f: ["X"] * 9 for f, _ in vmap.values()}
+                    raws = {f: [(0.0, 128.0, 128.0)] * 9
+                            for f, _ in vmap.values()}
+                key = "".join("".join(faces[f]) for f, _ in vmap.values())
 
-            key = "".join("".join(faces[f]) for f, _ in vmap.values())
             if key == self._last_key and "X" not in key:
                 self._stable_count += 1
             else:
@@ -218,9 +267,15 @@ class CameraWorker(QThread):
                 self._last_key = key
             stable = self._stable_count >= self.STABLE_FRAMES
 
-            self._draw_wireframe(cv2, frame, hexa, faces, vmap, stable)
-            frame = cv2.flip(frame, 1)  # mirror for natural aiming
-            self._draw_text(cv2, frame, hexa, vmap, stable)
+            if single:
+                self._draw_flat(cv2, frame, geom, faces["single"], stable)
+                frame = cv2.flip(frame, 1)  # mirror for natural aiming
+                self._draw_flat_text(cv2, frame, geom, self._single_face,
+                                     stable)
+            else:
+                self._draw_wireframe(cv2, frame, geom, faces, vmap, stable)
+                frame = cv2.flip(frame, 1)  # mirror for natural aiming
+                self._draw_text(cv2, frame, geom, vmap, stable)
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
@@ -230,6 +285,20 @@ class CameraWorker(QThread):
         cap.release()
 
     # -- cube localisation ---------------------------------------------------
+
+    @staticmethod
+    def _edge_map(cv2, np, frame):
+        """Colour-aware edge map: union of Canny over the B, G, R channels.
+
+        A grayscale-only Canny loses edges between a dark sticker (blue,
+        red) and a dark background even though the colours differ plainly.
+        """
+        blur = cv2.GaussianBlur(frame, (5, 5), 0)
+        edges = None
+        for ch in cv2.split(blur):
+            e = cv2.Canny(ch, 30, 90)
+            edges = e if edges is None else cv2.bitwise_or(edges, e)
+        return cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
 
     @staticmethod
     def _find_cube(cv2, np, frame) -> tuple[float, float, float] | None:
@@ -243,10 +312,7 @@ class CameraWorker(QThread):
         or None when no plausible cube is visible.
         """
         h, w = frame.shape[:2]
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(gray, 30, 90)
-        edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
+        edges = CameraWorker._edge_map(cv2, np, frame)
         contours, _ = cv2.findContours(edges, cv2.RETR_LIST,
                                        cv2.CHAIN_APPROX_SIMPLE)
 
@@ -306,6 +372,75 @@ class CameraWorker(QThread):
             return None
         return (cx, cy, e)
 
+    @staticmethod
+    def _find_flat(cv2, np, frame) -> tuple[float, float, float] | None:
+        """Locate a single flat-on cube face.
+
+        Same contour approach as :meth:`_find_cube` but with strict
+        square filters, since flat-on stickers project to squares.
+        Returns (x0, y0, size) of the 3x3 area or None.
+        """
+        h, w = frame.shape[:2]
+        edges = CameraWorker._edge_map(cv2, np, frame)
+        contours, _ = cv2.findContours(edges, cv2.RETR_LIST,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+
+        lo = (min(h, w) * 0.035) ** 2
+        hi = (min(h, w) * 0.28) ** 2
+        cand: list[tuple[float, float, float]] = []
+        for c in contours:
+            area = cv2.contourArea(c)
+            if not lo < area < hi:
+                continue
+            peri = cv2.arcLength(c, True)
+            approx = cv2.approxPolyDP(c, 0.06 * peri, True)
+            if len(approx) != 4 or not cv2.isContourConvex(approx):
+                continue
+            x, y, bw, bh = cv2.boundingRect(approx)
+            if not 0.65 < bw / bh < 1.55:
+                continue
+            if area / (bw * bh) < 0.62:
+                continue
+            cand.append((x + bw / 2.0, y + bh / 2.0, (bw + bh) / 2.0))
+
+        if len(cand) < 5:
+            return None
+        sides = sorted(s for _, _, s in cand)
+        med = sides[len(sides) // 2]
+        cand = [c for c in cand if 0.55 * med < c[2] < 1.7 * med]
+        if len(cand) < 5:
+            return None
+
+        reach = 3.4 * med
+        best: list[tuple[float, float, float]] = []
+        for cx, cy, _ in cand:
+            near = [c for c in cand
+                    if abs(c[0] - cx) < reach and abs(c[1] - cy) < reach]
+            if len(near) > len(best):
+                best = near
+        if len(best) < 5:
+            return None
+
+        xs = [c[0] for c in best]
+        ys = [c[1] for c in best]
+        x0 = min(xs) - med / 2.0
+        x1 = max(xs) + med / 2.0
+        y0 = min(ys) - med / 2.0
+        y1 = max(ys) + med / 2.0
+        bw, bh = x1 - x0, y1 - y0
+        if bw < 2.0 * med or bh < 2.0 * med:
+            return None
+        if not 0.65 < bw / bh < 1.55:
+            return None
+        size = max(bw, bh)
+        cx = (x0 + x1) / 2.0
+        cy = (y0 + y1) / 2.0
+        x0 = min(max(cx - size / 2.0, 0.0), w - size)
+        y0 = min(max(cy - size / 2.0, 0.0), h - size)
+        if size > min(h, w):
+            return None
+        return (x0, y0, size)
+
     # -- colour sampling -----------------------------------------------------
 
     @staticmethod
@@ -361,7 +496,94 @@ class CameraWorker(QThread):
             raws[face] = labs
         return faces, raws
 
+    @staticmethod
+    def _sample_flat(cv2, np, frame, geom: tuple[float, float, float], refs
+                     ) -> tuple[list[str], list[tuple[float, float, float]]]:
+        """Read the nine stickers of a flat-on face, row-major.
+
+        Sampled on the true (unmirrored) frame while the protocol has the
+        user look straight at each face, so grid order equals facelet
+        order directly.
+        """
+        h, w = frame.shape[:2]
+        x0, y0, size = geom
+        cell = size / 3.0
+        lab_img = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        letters: list[str] = []
+        labs: list[tuple[float, float, float]] = []
+        for row in range(3):
+            for col in range(3):
+                cx = int(x0 + col * cell + cell / 2)
+                cy = int(y0 + row * cell + cell / 2)
+                r = max(4, int(cell / 6))
+                px0, px1 = max(cx - r, 0), min(cx + r, w)
+                py0, py1 = max(cy - r, 0), min(cy + r, h)
+                patch = lab_img[py0:py1, px0:px1]
+                if patch.size == 0:
+                    letters.append("X")
+                    labs.append((0.0, 128.0, 128.0))
+                    continue
+                sample = (float(np.median(patch[:, :, 0])),
+                          float(np.median(patch[:, :, 1])),
+                          float(np.median(patch[:, :, 2])))
+                letters.append(classify_lab(sample, refs))
+                labs.append(sample)
+        return letters, labs
+
     # -- overlay -------------------------------------------------------------
+
+    @staticmethod
+    def _draw_flat(cv2, frame, geom, letters, stable) -> None:
+        """Square 3x3 overlay for single-face mode (true frame)."""
+        h, w = frame.shape[:2]
+        if geom is None:
+            size = min(h, w) * 0.55
+            geom = ((w - size) / 2.0, (h - size) / 2.0, size)
+            color = (110, 110, 110)
+            letters = None
+        else:
+            color = (90, 220, 90) if stable else (230, 230, 230)
+        x0, y0, size = (int(v) for v in geom)
+        cell = size // 3
+        for i in range(4):
+            cv2.line(frame, (x0 + i * cell, y0),
+                     (x0 + i * cell, y0 + 3 * cell), color, 2)
+            cv2.line(frame, (x0, y0 + i * cell),
+                     (x0 + 3 * cell, y0 + i * cell), color, 2)
+        if letters is None:
+            return
+        for row in range(3):
+            for col in range(3):
+                c = letters[row * 3 + col]
+                px = x0 + col * cell + cell // 2
+                py = y0 + row * cell + cell // 2
+                cv2.rectangle(frame, (px - 8, py - 8), (px + 8, py + 8),
+                              BGR.get(c, BGR["X"]), -1)
+                cv2.rectangle(frame, (px - 8, py - 8), (px + 8, py + 8),
+                              (20, 20, 20), 1)
+
+    @staticmethod
+    def _draw_flat_text(cv2, frame, geom, face: str, stable) -> None:
+        """Text and expected-centre label, drawn after the display flip."""
+        h, w = frame.shape[:2]
+        if geom is None:
+            cv2.putText(frame, "Looking for the cube...",
+                        (w // 2 - 150, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (230, 230, 230), 2)
+            size = min(h, w) * 0.55
+            gx, gy = w / 2.0, (h - size) / 2.0
+        else:
+            x0, y0, size = geom
+            gx, gy = w - (x0 + size / 2.0), y0   # mirror the x centre
+        want = EXPECTED_CENTER[face]
+        px, py = int(gx), max(int(gy) - 22, 22)
+        cv2.circle(frame, (px, py), 14, BGR[want], -1)
+        cv2.circle(frame, (px, py), 14, (20, 20, 20), 2)
+        cv2.putText(frame, face, (px - 8, py + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (20, 20, 20), 2)
+        if stable and geom is not None:
+            cv2.putText(frame, "LOCKED", (px + 28, py + 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (90, 220, 90), 2)
 
     @classmethod
     def _draw_wireframe(cls, cv2, frame, hexa, faces, vmap, stable) -> None:
