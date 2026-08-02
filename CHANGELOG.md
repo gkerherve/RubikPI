@@ -57,6 +57,8 @@ A solve clock, and fingers no longer read as white stickers.
   outright, which would have thrown away most real frames now that
   fingers are detected.
 
+## 0.13.0 — 2026-08-01
+
 Fixes follow-along never firing, and turns the panel into a confirmation.
 
 - **Detection no longer needs a perfectly steady reading.** It waited for
@@ -76,6 +78,8 @@ Fixes follow-along never firing, and turns the panel into a confirmation.
 - The cube and the unfolded net update as soon as a move is recognised,
   which is what was missing while detection never fired.
 
+## 0.12.0 — 2026-08-01
+
 The move you have to make demonstrates itself, over and over.
 
 - **The next move now plays on a loop** on the 3D cube: the layer turns,
@@ -92,6 +96,8 @@ The move you have to make demonstrates itself, over and over.
 - The loop runs at half frame rate (30fps) since it never stops, while
   real turns stay at 60fps; a turn takes the same ~430ms either way.
 
+## 0.11.0 — 2026-08-01
+
 See the side the camera is on, and change it whenever you like.
 
 - New **"Camera sees" panel** beside the 3D cube, showing that face flat
@@ -106,6 +112,8 @@ See the side the camera is on, and change it whenever you like.
   ("on your right" swaps sides) and leaves your progress untouched.
   While Follow me is running the camera sets it from the centre sticker
   by itself.
+
+## 0.10.0 — 2026-08-01
 
 One face, everywhere.  Corner (3-face) detection is gone.
 
@@ -130,6 +138,8 @@ One face, everywhere.  Corner (3-face) detection is gone.
   the centre, all 12 neighbouring turns from every rotation, the
   watched-face tie-break, and the hidden-face case.
 
+## 0.9.0 — 2026-08-01
+
 You can watch the turns happen, and the camera works out its own side.
 
 - **The cube is now drawn as 27 cubies in 3D** (new `cube3d` module,
@@ -150,6 +160,8 @@ You can watch the turns happen, and the camera works out its own side.
   eyeballed: every cubie rotation must reproduce the model's own result,
   and the finished animation was checked pixel-for-pixel against the
   moved cube for all 12 move types.
+
+## 0.8.0 — 2026-08-01
 
 RubikPI now knows which side of the cube the camera is on.
 
@@ -172,6 +184,8 @@ RubikPI now knows which side of the cube the camera is on.
 - New self-tests: left/right flip with camera position, every grip is a
   real one, and impossible grips raise instead of crashing.
 
+## 0.7.0 — 2026-08-01
+
 The cube's colour scheme is now yours, and defined in one place.
 
 - Faces follow the centre colours: **yellow up, white down, blue front,
@@ -187,6 +201,8 @@ The cube's colour scheme is now yours, and defined in one place.
   check passes.
 - Messages name the actual colours of the cube in use rather than
   assuming white and yellow are the top and bottom.
+
+## 0.6.0 — 2026-08-01
 
 Follow-along tracking, plain-English steps, and honest error messages.
 
@@ -221,6 +237,8 @@ Follow-along tracking, plain-English steps, and honest error messages.
   across all orientations, and a proof that three faces cannot determine
   a cube (two legal states sharing the same three faces).
 
+## 0.5.0 — 2026-08-01
+
 Easier scanning: single-face mode is back, and phones can be the camera.
 
 - New "Scan mode" choice: *Corner view — 3 faces, 2 shots* or *One face
@@ -238,6 +256,8 @@ Easier scanning: single-face mode is back, and phones can be the camera.
   six flat faces plus both corner views.
 - Single-face sampling runs on the true (unmirrored) frame, mapping
   grids 1:1 onto facelets with no mirror bookkeeping.
+
+## 0.4.0 — 2026-08-01
 
 Corner-view scanning: three faces at once, whole cube in two captures.
 
@@ -257,6 +277,8 @@ Corner-view scanning: three faces at once, whole cube in two captures.
   happens three faces at a time, so by view 2 white/yellow and
   red/orange are matched against this cube's measured stickers.
 
+## 0.3.0 — 2026-08-01
+
 Self-calibrating colours, inspired by cubed-core's calibration step
 (ideas only — its AGPL code is not used).
 
@@ -270,6 +292,8 @@ Self-calibrating colours, inspired by cubed-core's calibration step
 - References start from the nominal sticker colours and are blended, not
   replaced, so one bad frame cannot poison the calibration.
 
+## 0.2.0 — 2026-08-01
+
 The camera now finds the cube instead of hoping it is in the middle.
 
 - Cube localisation: sticker-sized squares are detected with a contour scan,
@@ -282,6 +306,8 @@ The camera now finds the cube instead of hoping it is in the middle.
   colour it sees when it refuses; manual Capture can still force it.
 - Manual capture is refused while no cube is detected.
 - Slightly wider white and orange bands in the HSV classifier.
+
+## 0.1.0 — 2026-08-01
 
 First release.
 
