@@ -43,8 +43,10 @@ possibilities* from wherever you currently stand.
   - *Speed* — Kociemba two-phase (about 20 moves).
 - **Tree of possibilities** — every legal move from the current position,
   scored by distance from solved, lazily expandable a few plies deep.
-- **Playback** — step through the solution move by move (with the turning
-  face highlighted) or press Play and watch it go.
+- **The next move demonstrates itself** — it plays on a loop on the 3D
+  cube, turning and snapping back, so you can copy it off the screen
+  instead of decoding "D2". Step through move by move, or press Play and
+  watch the whole solution go.
 - **No camera? No problem** — the Demo scramble button loads a random
   scramble so everything works without hardware.
 

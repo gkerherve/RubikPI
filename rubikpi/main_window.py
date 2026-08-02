@@ -494,9 +494,11 @@ class MainWindow(QMainWindow):
         if self.play_timer.isActive():
             self.play_timer.stop()
             self.btn_play.setText("▶ Play")
+            self.view.set_preview_move(self._preview_move_now())
         elif self.solution is not None:
             self.play_timer.start()
             self.btn_play.setText("⏸ Pause")
+            self.view.set_preview_move("")
 
     def _play_tick(self) -> None:
         if (self.solution is None
@@ -514,9 +516,22 @@ class MainWindow(QMainWindow):
             face = None
         self.view.set_cube(self.cube)
         self.view.set_highlight(face, highlight_move)
+        self.view.set_preview_move(self._preview_move_now())
         self.tree_panel.set_state(self.cube, self.solution, self.progress)
         if self.solution is not None:
             self._update_stage_label()
+
+    def _preview_move_now(self) -> str:
+        """The move to demonstrate on a loop, or "" for none.
+
+        Only while the user is the one doing the turning — during Play the
+        moves animate for real, one after another.
+        """
+        if self.solution is None or self.play_timer.isActive():
+            return ""
+        if self.progress >= len(self.solution.moves):
+            return ""
+        return self.solution.moves[self.progress]
 
     def _update_stage_label(self) -> None:
         assert self.solution is not None

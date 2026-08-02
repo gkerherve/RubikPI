@@ -17,6 +17,10 @@ Two things keep the picture readable while a solution plays:
   sides travel with it, as on a real cube — and a curved arrow shows the
   direction.
 
+While you are being shown what to do, the next move demonstrates itself:
+the layer turns, snaps back and turns again, over and over, so the move
+can be read off the cube instead of decoded from "D2".
+
 Beside the cube sits the face the camera is pointed at — the one you are
 looking at while you play, which on the isometric view is round the back.
 It is found by centre colour, so it keeps following the right side of the
@@ -62,6 +66,12 @@ class CubeViewWidget(QWidget):
     #: Milliseconds for a quarter turn, and the frame interval.
     TURN_MS = 420
     FRAME_MS = 16
+    #: Preview loop: pause at the end of the turn, then before repeating.
+    #: It runs for as long as a move is waiting to be done, so it ticks at
+    #: half the frame rate of a real turn to stay cheap.
+    HOLD_MS = 520
+    GAP_MS = 320
+    PREVIEW_FRAME_MS = 33
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -83,6 +93,10 @@ class CubeViewWidget(QWidget):
         self._anim_dir = 1             # +1 clockwise, -1 anticlockwise
         self._anim_t = 0.0             # 0 -> 1
         self._anim_cube: Cube | None = None
+        self._mode = ""                # "", "move" or "preview"
+        self._preview_move = ""        # the move being demonstrated
+        self._stage = "turn"           # preview loop: turn / hold / gap
+        self._wait = 0                 # frames left in hold or gap
         self._timer = QTimer(self)
         self._timer.setInterval(self.FRAME_MS)
         self._timer.timeout.connect(self._tick)
@@ -118,18 +132,60 @@ class CubeViewWidget(QWidget):
             self.animation_finished.emit()
             return
         self._anim_cube = before.copy()
-        self._anim_face = core
-        self._anim_quarters = 2.0 if move.endswith("2") else 1.0
-        self._anim_dir = -1 if move.endswith("'") else 1
+        self._mode = "move"
+        self._set_turn(move)
         self._anim_t = 0.0
+        self._timer.setInterval(self.FRAME_MS)
         self._timer.start()
         self.update()
 
+    def set_preview_move(self, move: str) -> None:
+        """Loop *move* on the current cube so its meaning is obvious.
+
+        Nothing is committed: the layer turns, snaps back and turns
+        again.  A real move animation takes over when one arrives, and
+        the loop resumes afterwards with whatever is next.
+        """
+        core = move[0] if move else ""
+        if core not in FACES:
+            move = ""
+        if move == self._preview_move:
+            return
+        self._preview_move = move
+        if self._mode == "move":
+            return                      # resumes when that finishes
+        self._start_preview()
+
+    def _start_preview(self) -> None:
+        if not self._preview_move:
+            self._mode = ""
+            self._anim_face = None
+            self._timer.stop()
+            self.update()
+            return
+        self._mode = "preview"
+        self._anim_cube = None          # always demonstrate on the live cube
+        self._set_turn(self._preview_move)
+        self._anim_t = 0.0
+        self._stage = "turn"
+        self._wait = 0
+        self._timer.setInterval(self.PREVIEW_FRAME_MS)
+        self._timer.start()
+        self.update()
+
+    def _set_turn(self, move: str) -> None:
+        self._anim_face = move[0]
+        self._anim_quarters = 2.0 if move.endswith("2") else 1.0
+        self._anim_dir = -1 if move.endswith("'") else 1
+
     def stop_animation(self) -> None:
+        """Drop everything, preview included (used when jumping about)."""
         if self._timer.isActive():
             self._timer.stop()
         self._anim_face = None
         self._anim_cube = None
+        self._mode = ""
+        self._preview_move = ""
         self.update()
 
     @property
@@ -137,15 +193,38 @@ class CubeViewWidget(QWidget):
         return self._anim_face is not None
 
     def _tick(self) -> None:
-        step = self.FRAME_MS / (self.TURN_MS * self._anim_quarters)
+        frame = self._timer.interval() or self.FRAME_MS
+        step = frame / (self.TURN_MS * self._anim_quarters)
+        if self._mode == "preview":
+            if self._stage == "turn":
+                self._anim_t += step
+                if self._anim_t >= 1.0:
+                    self._anim_t = 1.0
+                    self._stage = "hold"
+                    self._wait = int(self.HOLD_MS / frame)
+            elif self._stage == "hold":
+                self._wait -= 1
+                if self._wait <= 0:     # snap back and pause before repeating
+                    self._anim_t = 0.0
+                    self._stage = "gap"
+                    self._wait = int(self.GAP_MS / frame)
+            else:
+                self._wait -= 1
+                if self._wait <= 0:
+                    self._stage = "turn"
+            self.update()
+            return
+
         self._anim_t += step
         if self._anim_t >= 1.0:
             self._timer.stop()
             self._anim_face = None
             self._anim_cube = None
             self._anim_t = 0.0
+            self._mode = ""
             self.update()
             self.animation_finished.emit()
+            self._start_preview()       # back to demonstrating what is next
             return
         self.update()
 
@@ -183,13 +262,18 @@ class CubeViewWidget(QWidget):
         self._paint_camera_panel(p, w - panel_w, 0, panel_w, iso_h, shown)
         self._paint_net(p, 0, iso_h, w, h - iso_h, shown, spot)
 
-        if self.move_text:
-            p.setPen(QPen(QColor("#e8b93c")))
+        label = self.move_text
+        colour = "#e8b93c"
+        if self._mode == "preview" and self._preview_move:
+            label = f"Do this:  {self._preview_move}"
+            colour = "#8fd3a8"
+        if label:
+            p.setPen(QPen(QColor(colour)))
             f = QFont(self.font())
             f.setPointSize(15)
             f.setBold(True)
             p.setFont(f)
-            p.drawText(12, 26, self.move_text)
+            p.drawText(12, 26, label)
         p.end()
 
     # The cube drawn as 27 cubies, back to front, so a turning layer

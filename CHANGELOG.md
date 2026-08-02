@@ -2,7 +2,23 @@
 
 All notable changes to RubikPI.
 
-## 0.11.0 — 2026-08-01
+## 0.12.0 — 2026-08-01
+
+The move you have to make demonstrates itself, over and over.
+
+- **The next move now plays on a loop** on the 3D cube: the layer turns,
+  holds, snaps back and turns again, for as long as that move is
+  outstanding. No need to know what "D2" or "R'" means — you can copy it
+  off the screen. Labelled "Do this: D2" above the cube.
+- Nothing is committed by the loop; it demonstrates on the cube's real
+  current state, so it re-bases itself automatically when you step
+  forward, step back or make the move in front of the camera.
+- A real turn takes priority: when you (or Step) actually make the move
+  it animates once at full speed, then the loop picks up the next move.
+- Play suspends the loop — there the moves animate for real, one after
+  another — and pressing Pause hands it straight back.
+- The loop runs at half frame rate (30fps) since it never stops, while
+  real turns stay at 60fps; a turn takes the same ~430ms either way.
 
 See the side the camera is on, and change it whenever you like.
 
