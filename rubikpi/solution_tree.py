@@ -158,7 +158,7 @@ class SolutionTreePanel(QWidget):
         box_lay.addWidget(self.tree)
         lay.addWidget(self.explorer_box, stretch=2)
 
-        self.hint = QLabel("Double-click a step to jump to it.")
+        self.hint = QLabel("← → step through the moves · double-click a step to jump to it.")
         self.hint.setObjectName("hintLabel")
         lay.addWidget(self.hint)
 

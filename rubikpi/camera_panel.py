@@ -102,6 +102,9 @@ class CameraPanel(QWidget):
             "  • Any phone: run the ‘IP Webcam’ app and enter its URL, e.g.\n"
             "    http://192.168.1.23:8080/video\n"
             "  • Iriun / DroidCam / Camo appear as an extra camera number.")
+        # Enter finishes editing, so the arrow keys go back to stepping
+        # through the solution rather than moving this field's cursor.
+        self.cam_source.returnPressed.connect(self.cam_source.clearFocus)
         cam_row.addWidget(self.cam_source, stretch=1)
         grid.addLayout(cam_row, 0, 1)
 
@@ -137,6 +140,7 @@ class CameraPanel(QWidget):
         if self.worker is not None:
             self.stop_camera()
             return
+        self.cam_source.clearFocus()   # give the keyboard back to the solve
         self.worker = CameraWorker(self.cam_source.text(), self)
         self.worker.frame_ready.connect(self._on_frame)
         self.worker.camera_error.connect(self._on_camera_error)

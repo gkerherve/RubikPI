@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rubikpi"
-version = "0.15.0"
+version = "0.16.0"
 description = "RubikPI — a visual Rubik's Cube solver: camera recognition, staged solutions and a tree of possibilities (PyQt6 + OpenCV)."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -2,6 +2,19 @@
 
 All notable changes to RubikPI.
 
+## 0.16.0 — 2026-08-02
+
+- **The left and right arrow keys step through the moves** once you have
+  a solution — back and forward — whatever part of the window you last
+  clicked. They were being swallowed whenever the focus sat in the
+  camera text box, which claims the arrows for its own cursor: after
+  typing a camera number the keys silently stopped working.
+- The keyboard is handed back automatically when you press Enter in that
+  box or press Start camera, and focus moves to the cube the moment a
+  solution is found, so the arrows work straight away.
+- The step buttons name their shortcuts, and the panel hint reads
+  "← → step through the moves".
+
 ## 0.15.0 — 2026-08-01
 
 Move detection rebuilt around what a camera actually delivers.

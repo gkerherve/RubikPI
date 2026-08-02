@@ -92,6 +92,9 @@ class CubeViewWidget(QWidget):
         self.setMinimumSize(380, 460)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Expanding)
+        # Somewhere harmless for the keyboard to live during a solve, so the
+        # arrow keys step moves instead of being eaten by a text field.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         # Animation state: the face being turned, how far through, and the
         # cube as it looked *before* the move.

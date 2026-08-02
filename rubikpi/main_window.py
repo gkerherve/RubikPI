@@ -196,10 +196,12 @@ class MainWindow(QMainWindow):
         self.btn_first = QPushButton("⏮")
         self.btn_first.clicked.connect(lambda: self.jump_to(0))
         self.btn_prev = QPushButton("◀")
+        self.btn_prev.setToolTip("Previous move  (Left arrow)")
         self.btn_prev.clicked.connect(self.step_back)
         self.btn_play = QPushButton("▶ Play")
         self.btn_play.clicked.connect(self.toggle_play)
         self.btn_next = QPushButton("▶|")
+        self.btn_next.setToolTip("Next move  (Right arrow)")
         self.btn_next.clicked.connect(self.step_forward)
         for b in (self.btn_first, self.btn_prev, self.btn_play, self.btn_next):
             ctrl.addWidget(b)
@@ -233,9 +235,13 @@ class MainWindow(QMainWindow):
 
         QShortcut(QKeySequence(Qt.Key.Key_Space), self,
                   activated=self.camera.capture_now)
-        QShortcut(QKeySequence(Qt.Key.Key_Right), self,
-                  activated=self.step_forward)
-        QShortcut(QKeySequence(Qt.Key.Key_Left), self, activated=self.step_back)
+        # Stepping through the solution is the main thing the keyboard is
+        # for, so these are application-wide: they still work when a combo
+        # box or the step list happens to hold the focus.
+        for key, step in ((Qt.Key.Key_Right, self.step_forward),
+                          (Qt.Key.Key_Left, self.step_back)):
+            shortcut = QShortcut(QKeySequence(key), self, activated=step)
+            shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.resize(1320, 760)
 
     # -- how the cube is held -------------------------------------------------
@@ -384,6 +390,7 @@ class MainWindow(QMainWindow):
         self.solution = solution
         self.progress = 0
         self._reset_clock()
+        self.view.setFocus()      # arrow keys now step through the moves
         stages = ", ".join(f"{s.label} ({len(s.moves)})"
                            for s in solution.stages)
         self._say(f"Solution found: {len(solution.moves)} moves via "
