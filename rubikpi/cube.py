@@ -393,6 +393,17 @@ def possible_schemes() -> list[dict[str, str]]:
     return out
 
 
+def face_with_center(cube: "Cube", colour: str) -> str | None:
+    """The face whose centre is *colour*, or None if that is not clear.
+
+    Centres never move, so this is how a colour ("the green side") is
+    turned back into a face of the model, whatever rotations have been
+    applied to it.
+    """
+    seen = [f for f in FACES if cube.center(f) == colour]
+    return seen[0] if len(seen) == 1 else None
+
+
 def orientation_for_colors(cube: "Cube", top: str, front: str) -> str | None:
     """Rotation putting the *top* colour up and the *front* colour forward.
 

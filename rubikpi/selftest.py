@@ -198,6 +198,21 @@ def main() -> int:
                          and probe.center("U") == DEFAULT_SCHEME["U"])
     all_ok &= check("the 3D view always shows blue at the front", anchored)
 
+    # The "Camera sees" panel follows a colour, so whole-cube rotations in
+    # a solution cannot make it drift onto a different side.
+    from rubikpi.cube import face_with_center
+
+    follows = True
+    for colour in (DEFAULT_SCHEME[f] for f in ("F", "R", "B", "L")):
+        for rot in ("", "y", "y2", "x", "z'", "x2 y"):
+            probe = Cube.solved()
+            probe.apply_sequence(Cube.random_scramble(12, random.Random(9)))
+            probe.apply_sequence(rot)
+            face = face_with_center(probe, colour)
+            follows &= face is not None and probe.center(face) == colour
+    all_ok &= check("the camera panel always shows the chosen colour's face",
+                    follows)
+
     # Camera position: your left/right depend on which side it watches.
     from rubikpi.cube import OPPOSITE, held_faces
 

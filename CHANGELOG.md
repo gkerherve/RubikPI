@@ -2,7 +2,22 @@
 
 All notable changes to RubikPI.
 
-## 0.10.0 — 2026-08-01
+## 0.11.0 — 2026-08-01
+
+See the side the camera is on, and change it whenever you like.
+
+- New **"Camera sees" panel** beside the 3D cube, showing that face flat
+  and full size — on the isometric view it is round the back, but it is
+  the one in front of *you* while you play. It updates with every move.
+- The same face is now outlined in **cyan on the unfolded net**, so it is
+  easy to place among the six.
+- The panel follows a **colour**, not a face name, so whole-cube
+  rotations inside a solution can never make it drift onto another side.
+- The "Camera sees" setting can be changed **at any time, mid-solve
+  included** — it re-draws the panel, re-words the instructions
+  ("on your right" swaps sides) and leaves your progress untouched.
+  While Follow me is running the camera sets it from the centre sticker
+  by itself.
 
 One face, everywhere.  Corner (3-face) detection is gone.
 

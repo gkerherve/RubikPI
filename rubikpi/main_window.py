@@ -145,9 +145,12 @@ class MainWindow(QMainWindow):
                 f"{COLOR_NAME[DEFAULT_SCHEME[face]]} side".capitalize(), face)
         self.camera_face.setCurrentIndex(2)  # green side, the usual way round
         self.camera_face.setToolTip(
-            "The face you point at the camera while solving.\n"
-            "You are looking at the opposite side, so this is what makes "
-            "“on your right” mean your right — not the camera's.")
+            "The face you point at the camera while solving — the one "
+            "drawn in the “Camera sees” panel beside the cube.\n"
+            "You look at the opposite side, so this is also what makes "
+            "“on your right” mean your right, not the camera's.\n"
+            "Change it whenever you like, mid-solve included; while the "
+            "camera is following it sets itself.")
         self.camera_face.currentIndexChanged.connect(self._on_camera_face)
         cam_row.addWidget(self.camera_face, stretch=1)
         mv.addLayout(cam_row)
@@ -198,6 +201,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.tree_panel)
 
         self.tree_panel.set_holding(self.holding())
+        self.view.set_camera_colour(
+            DEFAULT_SCHEME[self.camera_facing()])
         splitter.setSizes([420, 480, 380])
         self.statusBar().showMessage(
             "Welcome to RubikPI — scan your cube or try a demo scramble.")
@@ -225,6 +230,7 @@ class MainWindow(QMainWindow):
 
     def _on_camera_face(self) -> None:
         self.tree_panel.set_holding(self.holding())
+        self.view.set_camera_colour(DEFAULT_SCHEME[self.camera_facing()])
         cam = COLOR_NAME[DEFAULT_SCHEME[self.camera_facing()]]
         you = COLOR_NAME[DEFAULT_SCHEME[OPPOSITE[self.camera_facing()]]]
         right = COLOR_NAME[DEFAULT_SCHEME[self.holding()["R"]]]
@@ -456,6 +462,7 @@ class MainWindow(QMainWindow):
         self.camera_face.setCurrentIndex(index)
         self.camera_face.blockSignals(False)
         self.tree_panel.set_holding(self.holding())
+        self.view.set_camera_colour(DEFAULT_SCHEME[face])
 
     def _accept_user_move(self, move: str) -> None:
         """Apply a move the user physically made and re-sync the plan."""

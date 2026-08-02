@@ -16,6 +16,11 @@ Two things keep the picture readable while a solution plays:
   front, so a turning layer really rotates in 3D — the stickers on its
   sides travel with it, as on a real cube — and a curved arrow shows the
   direction.
+
+Beside the cube sits the face the camera is pointed at — the one you are
+looking at while you play, which on the isometric view is round the back.
+It is found by centre colour, so it keeps following the right side of the
+cube even when a solution contains whole-cube rotations.
 """
 
 from __future__ import annotations
@@ -28,7 +33,8 @@ from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from rubikpi import cube3d as g3
 from rubikpi.cube import (
-    DEFAULT_SCHEME, FACES, Cube, orientation_for_colors, position_of_faces,
+    COLOR_NAME, DEFAULT_SCHEME, FACES, Cube, face_with_center,
+    orientation_for_colors, position_of_faces,
 )
 
 STICKER_QCOLOR = {
@@ -62,6 +68,10 @@ class CubeViewWidget(QWidget):
         self.cube = Cube.unknown()
         self.highlight_face: str | None = None
         self.move_text: str = ""
+        #: Colour of the face the camera is pointed at, shown beside the
+        #: cube.  Held as a colour, not a face name, so whole-cube
+        #: rotations cannot make the panel drift onto another side.
+        self.camera_colour: str = DEFAULT_SCHEME["B"]
         self.setMinimumSize(380, 460)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Expanding)
@@ -82,6 +92,15 @@ class CubeViewWidget(QWidget):
     def set_cube(self, cube: Cube) -> None:
         self.cube = cube
         self.update()
+
+    def set_camera_colour(self, colour: str) -> None:
+        """Which side the camera is on, as a sticker colour letter."""
+        self.camera_colour = colour
+        self.update()
+
+    def camera_face(self, cube: Cube) -> str | None:
+        """The face of *cube* whose centre is the camera's colour."""
+        return face_with_center(cube, self.camera_colour)
 
     def set_highlight(self, face: str | None, move_text: str = "") -> None:
         self.highlight_face = face
@@ -158,7 +177,10 @@ class CubeViewWidget(QWidget):
         turning = where.get(self._anim_face) if self._anim_face else None
 
         iso_h = int(h * 0.58)
-        self._paint_isometric(p, 0, 0, w, iso_h, shown, spot, turning)
+        panel_w = int(min(w * 0.33, iso_h * 0.8))
+        self._paint_isometric(p, 0, 0, w - panel_w, iso_h, shown, spot,
+                              turning)
+        self._paint_camera_panel(p, w - panel_w, 0, panel_w, iso_h, shown)
         self._paint_net(p, 0, iso_h, w, h - iso_h, shown, spot)
 
         if self.move_text:
@@ -272,6 +294,49 @@ class CubeViewWidget(QWidget):
                     tip.y() - dy * size + dx * size * 0.55),
         ]))
 
+    def _paint_camera_panel(self, p: QPainter, x: int, y: int, w: int,
+                            h: int, shown: Cube) -> None:
+        """The face the camera is pointed at, drawn flat and labelled.
+
+        On the isometric view this side is round the back, but it is the
+        one in front of *you* while you play, so it gets its own panel.
+        """
+        face = self.camera_face(shown)
+        title = QFont(self.font())
+        title.setPointSizeF(max(8.0, min(w, h) * 0.075))
+        title.setBold(True)
+        p.setFont(title)
+        p.setPen(QPen(QColor("#4fc3f7")))
+        p.drawText(int(x + 8), int(y + h * 0.16), "Camera sees")
+
+        s = min(w * 0.78, h * 0.46) / 3.0
+        gx = x + (w - 3 * s) / 2.0
+        gy = y + h * 0.24
+        if face is None:                       # cube not scanned yet
+            p.setPen(QPen(QColor("#8a9099")))
+            p.drawText(int(x + 8), int(gy + s), "—")
+            return
+        stickers = shown.faces[face]
+        for row in range(3):
+            for col in range(3):
+                px = gx + col * s
+                py = gy + row * s
+                p.setBrush(STICKER_QCOLOR.get(stickers[row * 3 + col],
+                                              STICKER_QCOLOR["X"]))
+                p.setPen(QPen(QColor("#14161a"), max(1.0, s * 0.06)))
+                p.drawRect(int(px), int(py), int(s), int(s))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor("#4fc3f7"), 3))
+        p.drawRect(int(gx), int(gy), int(3 * s), int(3 * s))
+
+        name = QFont(self.font())
+        name.setPointSizeF(max(7.5, min(w, h) * 0.062))
+        p.setFont(name)
+        p.setPen(QPen(QColor("#c6cad1")))
+        p.drawText(int(x + 8), int(gy + 3 * s + h * 0.12),
+                   f"{COLOR_NAME[self.camera_colour]} side "
+                   f"— what you look at")
+
     def _paint_net(self, p: QPainter, x: int, y: int, w: int, h: int,
                    shown: Cube, spot: str | None) -> None:
         s = min(w / 12.6, h / 9.6)
@@ -291,8 +356,11 @@ class CubeViewWidget(QWidget):
                                                   STICKER_QCOLOR["X"]))
                     p.setPen(QPen(QColor("#14161a"), max(1.0, s * 0.05)))
                     p.drawRect(int(px), int(py), int(s), int(s))
+            watched = self.camera_face(shown)
             pen = QPen(QColor("#e8b93c") if face == spot
-                       else QColor("#30343b"), 2)
+                       else QColor("#4fc3f7") if face == watched
+                       else QColor("#30343b"),
+                       3 if face in (spot, watched) else 2)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.setPen(pen)
             p.drawRect(int(x0 + fc * s), int(y0 + fr * s),
