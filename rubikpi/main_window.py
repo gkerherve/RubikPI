@@ -28,9 +28,7 @@ from rubikpi.cube import (
 from rubikpi.cube_view import CubeViewWidget
 from rubikpi.solution_tree import SolutionTreePanel, move_in_words
 from rubikpi.solver import MODES, Solution, solve
-from rubikpi.tracker import (
-    best_match, describe_change, is_hidden, read_face,
-)
+from rubikpi.tracker import FollowTracker, describe_change, is_hidden
 
 STYLE = """
 QMainWindow, QWidget { background: #1d2026; color: #d8dce2;
@@ -96,9 +94,9 @@ class MainWindow(QMainWindow):
         #: Follow-along state: last accepted orientation and a small vote
         #: buffer, so one noisy frame cannot advance the solution.
         self._follow_match = None
-        self._pending_move = ""
-        self._pending_votes = 0
         self._note = ""            # last follow-along message, to avoid spam
+        #: Smooths the camera stream and decides what was turned.
+        self.follow_tracker = FollowTracker()
 
         self.play_timer = QTimer(self)
         self.play_timer.setInterval(900)
@@ -415,6 +413,7 @@ class MainWindow(QMainWindow):
             self._stop_clock()
         self._sync_views(highlight_move=move)
         self.view.animate_move(before, move)
+        self.follow_tracker.notice_change()
 
     def step_back(self) -> None:
         if self.solution is None or self.progress == 0:
@@ -426,10 +425,12 @@ class MainWindow(QMainWindow):
         self.cube.apply(undo)
         self._sync_views(highlight_move=move + " (undone)")
         self.view.animate_move(before, undo)
+        self.follow_tracker.notice_change()
 
     def jump_to(self, target: int) -> None:
         if self.solution is None:
             return
+        self.follow_tracker.notice_change()
         self.view.stop_animation()  # jumping is not a turn to watch
         target = max(0, min(target, len(self.solution.moves)))
         while self.progress < target:
@@ -456,9 +457,8 @@ class MainWindow(QMainWindow):
             self.btn_follow.setChecked(False)
             return
         self._follow_match = None
-        self._pending_move = ""
-        self._pending_votes = 0
         self._note = ""
+        self.follow_tracker.reset()
         if not on:
             self.view.set_live_face(None)
         self.camera.set_follow(on)
@@ -473,11 +473,9 @@ class MainWindow(QMainWindow):
     def _on_live_reading(self, grid: list, stable: bool) -> None:
         """Every camera frame while following: confirm, then detect.
 
-        Deliberately not gated on the raw reading being pixel-identical
-        for several frames: with a real webcam one borderline sticker
-        flickering would mean that never happens, and nothing would ever
-        be detected.  Votes are taken on the *interpretation* instead,
-        which tolerates a wobbling sticker.
+        The frames go through :class:`FollowTracker`, which steadies them
+        over a few looks and decides on the weight of evidence.  Nothing
+        here waits for a perfect reading: a webcam never gives one.
         """
         if not self.btn_follow.isChecked():
             return
@@ -487,79 +485,53 @@ class MainWindow(QMainWindow):
             self._follow_note("Show me one face of the cube, filling the "
                               "guide in the camera view.")
             return
-        # A few unreadable stickers are expected — fingers hold the cube —
-        # so they are passed straight through and treated as unknown.
 
-        face, _, score, known = read_face(self.cube, grid)
-        if not face:
-            self.view.set_live_face(grid, False)
-            hidden = sum(1 for c in grid if c == "X")
-            if grid[4] == "X":
-                self._follow_note("Your finger is over the middle sticker — "
-                                  "I need that one to tell which side I am "
-                                  "looking at.")
-            else:
-                self._follow_note("That centre colour does not match any side "
-                                  "of your cube — check the scan, or the "
-                                  f"lighting. ({hidden} stickers hidden)")
+        expected = (self.solution.moves[self.progress]
+                    if self.solution and self.progress < len(self.solution.moves)
+                    else "")
+        reading = self.follow_tracker.observe(self.cube, grid,
+                                              expected=expected)
+        match = reading.match
+
+        self.view.set_live_face(reading.grid, reading.agrees)
+        if match.face:
+            # The centre names the face, so the camera knows its own side.
+            self._sync_camera_face(match.face)
+
+        if reading.lost:
+            self._note = ""
+            self._say(reading.note)
             return
 
-        # The centre names the face, so the camera knows its own side.
-        self._sync_camera_face(face)
-        self.view.set_live_face(grid, known > 0 and score == known)
+        if reading.accepted:
+            self._note = ""
+            self._follow_match = match
+            self._accept_user_move(reading.accepted)
+            return
+
         if self.solution is None:
             return
 
-        expected = (self.solution.moves[self.progress]
-                    if self.progress < len(self.solution.moves) else "")
-        match = best_match(self.cube, grid, expected=expected)
-        if not match.confident:
-            self._pending_move = ""
-            self._pending_votes = 0
-            if known < 6:
-                self._follow_note(
-                    f"Too much of the face is covered ({9 - known} stickers) "
-                    "— move your fingers off it for a moment.")
-            else:
-                self._follow_note(
-                    "Not sure what changed — your fingers may be over the "
-                    "stickers that would tell me. Move them, or press the "
-                    "right arrow if you have done the move.")
-            return
-
-        moved_words = describe_change(self._follow_match, match)
-        self._follow_match = match
-
-        if match.move == "":
+        if not match.move and match.fits:
+            moved = describe_change(self._follow_match, match)
+            self._follow_match = match
             seen = COLOR_NAME[self.cube.center(match.face)]
-            if moved_words:
-                self._note = ""     # a real event: allow the next message
-                self._say(f"You {moved_words} — I can see the {seen} side "
-                          f"now. {self._next_hint()}")
+            if moved:
+                self._note = ""
+                self._say(f"You {moved} — I can see the {seen} side now. "
+                          f"{self._next_hint()}")
             elif expected and is_hidden(match.face, expected):
                 self._follow_note(
                     f"{expected} is on the side facing away from me — turn "
                     "the cube to show it, or press the right arrow when you "
                     "have done it.")
             else:
-                self._follow_note(f"Watching the {seen} side. "
+                hidden = match.hidden
+                extra = f" ({hidden} hidden)" if hidden else ""
+                self._follow_note(f"Watching the {seen} side{extra}. "
                                   f"{self._next_hint()}")
-            self._pending_move = ""
-            self._pending_votes = 0
-            return
-
-        # A face was turned: require agreement across a couple of frames.
-        if match.move != self._pending_move:
-            self._pending_move = match.move
-            self._pending_votes = 1
-            return
-        self._pending_votes += 1
-        if self._pending_votes < self.FOLLOW_VOTES:
-            return
-        self._pending_move = ""
-        self._pending_votes = 0
-        self._note = ""
-        self._accept_user_move(match.move)
+        elif reading.note:
+            self._follow_note(reading.note)
 
     def _follow_note(self, text: str) -> None:
         """Say something once, not on every frame."""
@@ -604,6 +576,7 @@ class MainWindow(QMainWindow):
                 self._stop_clock()
             self._sync_views(highlight_move=move)
             self.view.animate_move(before, move)
+            self.follow_tracker.notice_change()
             if done:
                 self._say("🎉 That was the last move — solved!")
             else:

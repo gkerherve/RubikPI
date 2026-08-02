@@ -213,8 +213,65 @@ def main() -> int:
     all_ok &= check("the camera panel always shows the chosen colour's face",
                     follows)
 
+    # The follow tracker on a noisy stream, which is what a webcam gives.
+    from rubikpi import tracker as tk
+    from rubikpi.cube import OPPOSITE
+    COLOURS = "WYROGB"
+
+    def noisy(grid, wrong, blank, rng):
+        out = []
+        for colour in grid:
+            roll = rng.random()
+            if roll < blank:
+                out.append("X")
+            elif roll < blank + wrong:
+                out.append(rng.choice([x for x in COLOURS if x != colour]))
+            else:
+                out.append(colour)
+        return out
+
+    def run_turn(move, wrong, blank, seed, frames=20):
+        rng = random.Random(seed)
+        start = Cube.solved()
+        start.apply_sequence(Cube.random_scramble(20, random.Random(seed)))
+        follow = tk.FollowTracker()
+        for _ in range(8):
+            follow.observe(start, noisy(start.faces["B"], wrong, blank, rng),
+                           expected=move)
+        after = start.moved(move)
+        for _ in range(frames):
+            got = follow.observe(start,
+                                 noisy(after.faces["B"], wrong, blank, rng),
+                                 expected=move)
+            if got.accepted:
+                return got.accepted
+        return ""
+
+    turns = [m for m in ALL_MOVES if m[0] != OPPOSITE["B"]]
+    detected = sum(1 for i, m in enumerate(turns * 6)
+                   if run_turn(m, 0.12, 0.08, i) == m)
+    all_ok &= check(
+        "noisy frames (12% misread, 8% covered): turns still detected",
+        detected >= len(turns) * 6 * 0.9,
+    )
+
+    quiet = random.Random(3)
+    phantoms = 0
+    for seed in range(60):
+        idle = Cube.solved()
+        idle.apply_sequence(Cube.random_scramble(20, random.Random(seed)))
+        follow = tk.FollowTracker()
+        for _ in range(40):
+            got = follow.observe(idle, noisy(idle.faces["B"], 0.10, 0.08,
+                                             quiet),
+                                 expected=ALL_MOVES[seed % len(ALL_MOVES)])
+            if got.accepted:
+                phantoms += 1
+                break
+    all_ok &= check("an untouched cube never produces a move", phantoms == 0)
+
     # Camera position: your left/right depend on which side it watches.
-    from rubikpi.cube import OPPOSITE, held_faces
+    from rubikpi.cube import OPPOSITE, held_faces  # noqa: F811
 
     grips = {cam: held_faces(OPPOSITE[cam], "U") for cam in ("F", "R", "B", "L")}
     all_ok &= check(

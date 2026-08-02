@@ -2,6 +2,36 @@
 
 All notable changes to RubikPI.
 
+## 0.15.0 — 2026-08-01
+
+Move detection rebuilt around what a camera actually delivers.
+
+Measured on simulated frame streams, detection went from **0% to 99%**
+once two stickers are misread — which a webcam does constantly.
+
+- **Frames are steadied before matching.** Each cell takes the colour it
+  is read as most often over the last five frames, so a sticker
+  flickering between red and orange settles instead of poisoning every
+  comparison.
+- **Decisions are made on the margin over rival explanations**, not on a
+  reading being near-perfect. The old rule allowed at most one wrong
+  sticker out of nine; at two it detected nothing at all, silently.
+- **Weak evidence is allowed to take longer.** A turn sometimes alters
+  only one sticker the camera can see, so instead of discarding those,
+  they simply need more agreeing frames.
+- **Turning the watched face now needs proof something moved.** That turn
+  is genuinely indistinguishable from rolling the cube in your hands, so
+  the app leans on the move it asked for — but only if the face has
+  actually changed since it was last at rest. Without that check, noise
+  alone produced phantom moves in 17% of idle runs; now none at
+  realistic noise.
+- **"I have lost track"** — if nothing explains the picture for a couple
+  of seconds, it says so and suggests a rescan instead of staying quiet.
+
+Detection rate with 15% of stickers misread and 10% hidden: 98%, with no
+false detections. All 15 visible moves, including turns of the watched
+face.
+
 ## 0.14.0 — 2026-08-01
 
 A solve clock, and fingers no longer read as white stickers.
