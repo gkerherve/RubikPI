@@ -26,6 +26,11 @@ possibilities* from wherever you currently stand.
   the frame (contour detection), colours are classified in Lab space and
   self-calibrate from your own stickers, and steady readings auto-capture.
   A guided 6-step protocol tells you exactly how to hold the cube.
+- **All 54 stickers are judged together**, not one at a time: the scan
+  solves for the cheapest reading that uses each colour exactly nine
+  times (Hungarian assignment, with your own scanned centres as the
+  reference colours). This is what fixes red/orange and white/yellow
+  under awkward lighting.
 - **Solve timer** — starts on your first move, stops when the cube is
   solved, with the move count beside it.
 - **Fingers are not mistaken for stickers** — skin is warm and washed out

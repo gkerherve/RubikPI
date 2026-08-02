@@ -41,6 +41,9 @@ class CameraPanel(QWidget):
         self.follow = False
         self.step_index = 0
         self.captured: dict[str, list[str]] = {}
+        #: Raw Lab readings per face, kept so all 54 stickers can be
+        #: decided together once the scan is done (see rubikpi.assign).
+        self.samples: dict[str, list[tuple[float, float, float]]] = {}
         self._last_grid: list[str] = []
         self._last_raw: list[tuple[float, float, float]] = []
         self._last_stable = False
@@ -235,6 +238,7 @@ class CameraPanel(QWidget):
                 and colors[4] == EXPECTED_CENTER[face]):
             self.worker.learn_center(EXPECTED_CENTER[face], self._last_raw[4])
         self.captured[face] = colors
+        self.samples[face] = list(self._last_raw)
         self.face_captured.emit(face, colors)
         self.step_index += 1
         self._configure_worker_step()
@@ -252,6 +256,7 @@ class CameraPanel(QWidget):
         self.step_index -= 1
         face = SCAN_STEPS[self.step_index][0]
         self.captured.pop(face, None)
+        self.samples.pop(face, None)
         self._configure_worker_step()
         self._refresh_progress()
         self.status.emit(f"Rescanning face {face}.")
@@ -259,6 +264,7 @@ class CameraPanel(QWidget):
     def reset_scan(self) -> None:
         self.step_index = 0
         self.captured.clear()
+        self.samples.clear()
         self._configure_worker_step()
         self._refresh_progress()
         self.scan_reset.emit()
@@ -267,6 +273,7 @@ class CameraPanel(QWidget):
     def mark_demo(self) -> None:
         """Called when a demo scramble replaces the scan."""
         self.step_index = len(SCAN_STEPS)
+        self.samples.clear()          # a demo has no camera readings
         for face in ALL_FACES:
             self.captured[face] = ["?"] * 9
         self._refresh_progress()

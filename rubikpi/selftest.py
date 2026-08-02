@@ -12,6 +12,7 @@ Run with:  python -m rubikpi.selftest
 
 from __future__ import annotations
 
+import itertools
 import random
 
 from rubikpi.cube import (
@@ -269,6 +270,90 @@ def main() -> int:
                 phantoms += 1
                 break
     all_ok &= check("an untouched cube never produces a move", phantoms == 0)
+
+    # Deciding all 54 stickers together, rather than one at a time.
+    from rubikpi.assign import assign, distance, hungarian, resolve_scan
+
+    exact = True
+    picker = random.Random(77)
+    for _ in range(60):
+        rows = picker.randint(1, 6)
+        cols = picker.randint(rows, 7)
+        table = [[round(picker.uniform(0, 40), 3) for _ in range(cols)]
+                 for _ in range(rows)]
+        got = hungarian(table)
+        mine = sum(table[i][got[i]] for i in range(rows))
+        best = min(sum(table[i][order[i]] for i in range(rows))
+                   for order in itertools.permutations(range(cols), rows))
+        exact &= abs(mine - best) < 1e-9 and len(set(got)) == rows
+    all_ok &= check("the assignment really is the cheapest one", exact)
+
+    # Six reference colours, roughly as far apart as real stickers are.
+    PALETTE = {"W": (246.0, 128.0, 128.0), "Y": (214.0, 121.0, 201.0),
+               "R": (119.0, 191.0, 164.0), "O": (167.0, 164.0, 194.0),
+               "G": (157.0, 75.0, 162.0), "B": (109.0, 140.0, 75.0)}
+
+    def photograph(cube, rng, blur, cast, gradient):
+        """Fake a scan: sensor noise, a colour cast and uneven lighting."""
+        seen = {}
+        for face in FACES:
+            readings = []
+            for i, letter in enumerate(cube.faces[face]):
+                light, a, b = PALETTE[letter]
+                slope = gradient * ((i % 3) - 1)
+                readings.append((light + slope + rng.gauss(0, blur),
+                                 a + cast[0] + rng.gauss(0, blur),
+                                 b + cast[1] + rng.gauss(0, blur)))
+            seen[face] = readings
+        return seen
+
+    def one_at_a_time(seen):
+        refs = {DEFAULT_SCHEME[f]: seen[f][4] for f in FACES}
+        return {f: [min(refs, key=lambda k: distance(s, refs[k]))
+                    for s in seen[f]] for f in FACES}
+
+    def miscounted(faces):
+        tally = {}
+        for face in FACES:
+            for letter in faces[face]:
+                tally[letter] = tally.get(letter, 0) + 1
+        return sorted(tally.values()) != [9] * 6
+
+    alone_perfect = together_perfect = 0
+    alone_counts = together_counts = 0
+    rounds = 40
+    for seed in range(rounds):
+        rng = random.Random(seed)
+        truth = Cube.solved()
+        truth.apply_sequence(Cube.random_scramble(25, random.Random(seed)))
+        seen = photograph(truth, rng, 9.0, (9.0, 7.0), 12.0)
+        alone = one_at_a_time(seen)
+        together, doubtful = resolve_scan(seen, DEFAULT_SCHEME)
+        alone_perfect += alone == truth.faces
+        together_perfect += together == truth.faces
+        alone_counts += not miscounted(alone)
+        together_counts += not miscounted(together)
+        all_ok &= len(doubtful) == 48
+
+    all_ok &= check(
+        "under a colour cast, deciding together beats one at a time "
+        f"({together_perfect}/{rounds} vs {alone_perfect}/{rounds} perfect)",
+        together_perfect > alone_perfect,
+    )
+    all_ok &= check(
+        "nine of every colour is guaranteed, not hoped for "
+        f"({together_counts}/{rounds} vs {alone_counts}/{rounds})",
+        together_counts == rounds,
+    )
+
+    # Centres are ground truth, so they must survive untouched.
+    rng = random.Random(5)
+    truth = Cube.solved()
+    truth.apply_sequence(Cube.random_scramble(25, random.Random(5)))
+    seen = photograph(truth, rng, 6.0, (0.0, 0.0), 8.0)
+    settled, _ = resolve_scan(seen, DEFAULT_SCHEME)
+    all_ok &= check("the scanned centres are kept as they were",
+                    all(settled[f][4] == DEFAULT_SCHEME[f] for f in FACES))
 
     # Camera position: your left/right depend on which side it watches.
     from rubikpi.cube import OPPOSITE, held_faces  # noqa: F811

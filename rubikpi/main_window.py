@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from rubikpi import __app_name__, __version__
+from rubikpi.assign import resolve_scan
 from rubikpi.camera_panel import CameraPanel
 from rubikpi.cube import (
     COLOR_NAME, DEFAULT_SCHEME, FACES, OPPOSITE, Cube, held_faces,
@@ -95,6 +96,8 @@ class MainWindow(QMainWindow):
         #: buffer, so one noisy frame cannot advance the solution.
         self._follow_match = None
         self._note = ""            # last follow-along message, to avoid spam
+        #: Stickers whose colour was the closest call, worst first.
+        self._doubtful: list[tuple[str, int, float]] = []
         #: Smooths the camera stream and decides what was turned.
         self.follow_tracker = FollowTracker()
 
@@ -322,17 +325,52 @@ class MainWindow(QMainWindow):
         self._invalidate_solution()
         self._sync_views()
 
+    def _settle_colours(self) -> str:
+        """Decide all 54 stickers together now that every face is in.
+
+        Judged one at a time, a washed-out red only has to look more like
+        orange than like red; nothing notices the cube has ended up with
+        eleven oranges.  Deciding them together makes "nine of each" a
+        constraint rather than a hope, and the comparison becomes which
+        sticker is the *better* red — which is the question the
+        red/orange and white/yellow pairs actually turn on.
+        """
+        samples = getattr(self.camera, "samples", {})
+        if len(samples) != len(FACES):
+            return ""                      # a demo scramble, or no camera
+        try:
+            faces, doubtful = resolve_scan(samples, DEFAULT_SCHEME)
+        except ValueError:
+            return ""
+        changed = sum(1 for f in FACES for i in range(9)
+                      if self.cube.faces[f][i] != faces[f][i])
+        for face in FACES:
+            self.cube.faces[face] = faces[face]
+        self._doubtful = doubtful
+        if not changed:
+            return ""
+        return (f" Re-read {changed} sticker{'s' if changed > 1 else ''} "
+                "by comparing the whole cube at once.")
+
     def _on_scan_complete(self) -> None:
+        note = self._settle_colours()
+        self._sync_views()
         ok, why = self.cube.is_solvable()
         if ok:
-            self._say("Cube captured and checked — press Solve!")
+            self._say("Cube captured and checked — press Solve!" + note)
             self.stage_label.setText("Cube captured ✔ — choose a mode and "
                                      "press Solve.")
         else:
             self._say(f"Scan finished but the cube is impossible: {why}")
+            hint = ""
+            if self._doubtful:
+                face, index, _ = self._doubtful[0]
+                hint = (f"  The least certain sticker is on face {face}; "
+                        "rescanning that face in better light usually "
+                        "fixes it.")
             self.stage_label.setText(
                 f"⚠ Misread scan — {why}  Use “Redo previous step” to "
-                "rescan that part in better light.")
+                "rescan that part in better light." + hint)
 
     def _on_scan_reset(self) -> None:
         self.cube = Cube.unknown()

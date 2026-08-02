@@ -2,6 +2,31 @@
 
 All notable changes to RubikPI.
 
+## 0.17.0 — 2026-08-02
+
+All 54 stickers are now decided together instead of one at a time.
+
+Judged alone, a washed-out red only has to look more like orange than
+like red to be called orange — and nothing notices the cube has ended up
+with eleven oranges and seven reds.  Deciding them together turns "nine
+of every colour" into a constraint, and changes the question from "is
+this red?" to "is this a *better* red than the others?" — which is
+exactly what the red/orange and white/yellow pairs turn on.
+
+- New `assign` module: the cheapest set of assignments using each colour
+  nine times, found exactly with the Hungarian algorithm (48x48, ~6 ms,
+  no new dependencies).  The six scanned centres are the reference
+  colours, so the comparison is against *your* cube under *your* light.
+- Measured on simulated scans, perfect-scan rate: **84% → 100%** under a
+  warm light, **51% → 92%** with a strong colour cast, **2% → 47%** in
+  harsh light.  Colour counts are now correct 100% of the time by
+  construction, against 3-84% before.
+- The scan reports what it changed ("Re-read 19 stickers by comparing the
+  whole cube at once"), and when a cube still comes out impossible it
+  names the face holding the least certain sticker.
+- Every sticker now carries a confidence margin, which is what a
+  click-to-correct editor would need next.
+
 ## 0.16.0 — 2026-08-02
 
 - **The left and right arrow keys step through the moves** once you have
