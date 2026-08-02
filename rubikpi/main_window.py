@@ -28,7 +28,9 @@ from rubikpi.cube import (
 from rubikpi.cube_view import CubeViewWidget
 from rubikpi.solution_tree import SolutionTreePanel, move_in_words
 from rubikpi.solver import MODES, Solution, solve
-from rubikpi.tracker import best_match, describe_change, is_hidden
+from rubikpi.tracker import (
+    best_match, describe_change, is_hidden, read_face,
+)
 
 STYLE = """
 QMainWindow, QWidget { background: #1d2026; color: #d8dce2;
@@ -95,6 +97,7 @@ class MainWindow(QMainWindow):
         self._follow_match = None
         self._pending_move = ""
         self._pending_votes = 0
+        self._note = ""            # last follow-along message, to avoid spam
 
         self.play_timer = QTimer(self)
         self.play_timer.setInterval(900)
@@ -373,7 +376,7 @@ class MainWindow(QMainWindow):
     # -- follow-along ---------------------------------------------------------
 
     #: Frames that must agree before a detected move is accepted.
-    FOLLOW_VOTES = 2
+    FOLLOW_VOTES = 3
 
     def toggle_follow(self, on: bool) -> None:
         if on and self.solution is None:
@@ -387,6 +390,9 @@ class MainWindow(QMainWindow):
         self._follow_match = None
         self._pending_move = ""
         self._pending_votes = 0
+        self._note = ""
+        if not on:
+            self.view.set_live_face(None)
         self.camera.set_follow(on)
         if on:
             self.play_timer.stop()
@@ -397,35 +403,64 @@ class MainWindow(QMainWindow):
             self._say("Follow me off.")
 
     def _on_live_reading(self, grid: list, stable: bool) -> None:
-        """Camera frame during follow-along: work out what the user did."""
-        if not self.btn_follow.isChecked() or self.solution is None:
+        """Every camera frame while following: confirm, then detect.
+
+        Deliberately not gated on the raw reading being pixel-identical
+        for several frames: with a real webcam one borderline sticker
+        flickering would mean that never happens, and nothing would ever
+        be detected.  Votes are taken on the *interpretation* instead,
+        which tolerates a wobbling sticker.
+        """
+        if not self.btn_follow.isChecked():
             return
-        if not stable or "X" in grid:
-            return
-        expected = (self.solution.moves[self.progress]
-                    if self.progress < len(self.solution.moves) else "")
-        match = best_match(self.cube, list(grid), expected=expected)
-        if not match.confident:
-            if match.ambiguous:
-                self._say("Not sure what changed — hold the cube steady, or "
-                          "show me the face you are turning.")
+        grid = list(grid)
+        if len(grid) != 9 or "X" in grid:
+            self.view.set_live_face(None)
+            self._follow_note("Show me one face of the cube, filling the "
+                              "guide in the camera view.")
             return
 
-        # The centre sticker names the face, so the camera works out its
-        # own side without being told.
-        self._sync_camera_face(match.face)
+        face, _, score = read_face(self.cube, grid)
+        if not face:
+            self.view.set_live_face(grid, False)
+            self._follow_note("That centre colour does not match any side of "
+                              "your cube — check the scan, or the lighting.")
+            return
+
+        # The centre names the face, so the camera knows its own side.
+        self._sync_camera_face(face)
+        self.view.set_live_face(grid, score == 9)
+        if self.solution is None:
+            return
+
+        expected = (self.solution.moves[self.progress]
+                    if self.progress < len(self.solution.moves) else "")
+        match = best_match(self.cube, grid, expected=expected)
+        if not match.confident:
+            self._pending_move = ""
+            self._pending_votes = 0
+            self._follow_note(
+                "Not sure what changed — hold the cube still for a moment, "
+                f"or show me the face you are turning. ({score}/9 known)")
+            return
+
         moved_words = describe_change(self._follow_match, match)
         self._follow_match = match
 
         if match.move == "":
             seen = COLOR_NAME[self.cube.center(match.face)]
             if moved_words:
+                self._note = ""     # a real event: allow the next message
                 self._say(f"You {moved_words} — I can see the {seen} side "
                           f"now. {self._next_hint()}")
             elif expected and is_hidden(match.face, expected):
-                self._say(f"{expected} is on the side facing away from me — "
-                          "turn the cube to show it, or press the right "
-                          "arrow when you have done it.")
+                self._follow_note(
+                    f"{expected} is on the side facing away from me — turn "
+                    "the cube to show it, or press the right arrow when you "
+                    "have done it.")
+            else:
+                self._follow_note(f"Watching the {seen} side. "
+                                  f"{self._next_hint()}")
             self._pending_move = ""
             self._pending_votes = 0
             return
@@ -440,7 +475,14 @@ class MainWindow(QMainWindow):
             return
         self._pending_move = ""
         self._pending_votes = 0
+        self._note = ""
         self._accept_user_move(match.move)
+
+    def _follow_note(self, text: str) -> None:
+        """Say something once, not on every frame."""
+        if text != self._note:
+            self._note = text
+            self._say(text)
 
     def _next_hint(self) -> str:
         """One line telling the user what to do next."""

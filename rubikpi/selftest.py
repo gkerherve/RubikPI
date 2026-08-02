@@ -278,6 +278,16 @@ def main() -> int:
         and tk.best_match(c, seen, expected=hidden).move == "",
     )
 
+    # Reading the face back: 9/9 confirms the app and the cube agree.
+    agree = all(tk.read_face(c, tk.rotate_face(c.faces[f], k)) == (f, k, 9)
+                for f in FACES for k in range(4))
+    all_ok &= check("a matching face reads 9 out of 9, at any rotation",
+                    agree)
+    _, _, after_turn = tk.read_face(c, tk.rotate_face(c.moved("U").faces[watched],
+                                                      0))
+    all_ok &= check("after a turn the same face no longer reads 9 out of 9",
+                    after_turn < 9)
+
     noisy = tk.rotate_face(c.moved("U").faces[watched], 1)
     noisy[7] = "W" if noisy[7] != "W" else "G"
     all_ok &= check("tracker: survives one misread sticker",

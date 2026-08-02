@@ -24,7 +24,10 @@ can be read off the cube instead of decoded from "D2".
 Beside the cube sits the face the camera is pointed at — the one you are
 looking at while you play, which on the isometric view is round the back.
 It is found by centre colour, so it keeps following the right side of the
-cube even when a solution contains whole-cube rotations.
+cube even when a solution contains whole-cube rotations.  While the camera
+is following, that panel shows the *live* reading rather than the app's
+belief, with a tick when the two agree: confirmation that your cube and
+the plan are still in step.
 """
 
 from __future__ import annotations
@@ -82,6 +85,10 @@ class CubeViewWidget(QWidget):
         #: cube.  Held as a colour, not a face name, so whole-cube
         #: rotations cannot make the panel drift onto another side.
         self.camera_colour: str = DEFAULT_SCHEME["B"]
+        #: Live 9 stickers from the camera and whether they match the
+        #: model.  None means the camera is not watching.
+        self.live_face: list[str] | None = None
+        self.live_matches: bool = False
         self.setMinimumSize(380, 460)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,
                            QSizePolicy.Policy.Expanding)
@@ -110,6 +117,13 @@ class CubeViewWidget(QWidget):
     def set_camera_colour(self, colour: str) -> None:
         """Which side the camera is on, as a sticker colour letter."""
         self.camera_colour = colour
+        self.update()
+
+    def set_live_face(self, letters: list[str] | None,
+                      matches: bool = False) -> None:
+        """What the camera reads right now, and whether it fits the model."""
+        self.live_face = list(letters) if letters else None
+        self.live_matches = matches
         self.update()
 
     def camera_face(self, cube: Cube) -> str | None:
@@ -380,27 +394,36 @@ class CubeViewWidget(QWidget):
 
     def _paint_camera_panel(self, p: QPainter, x: int, y: int, w: int,
                             h: int, shown: Cube) -> None:
-        """The face the camera is pointed at, drawn flat and labelled.
+        """The side the camera is on: what it reads, or what is expected.
 
         On the isometric view this side is round the back, but it is the
-        one in front of *you* while you play, so it gets its own panel.
+        one in front of *you* while you play.  With the camera following
+        it shows the live reading and ticks when that agrees with the
+        app — so a wrong turn, or a turn the app missed, is visible at
+        once instead of silently drifting.
         """
         face = self.camera_face(shown)
+        live = self.live_face is not None
+        accent = QColor("#4fc3f7")
+        if live:
+            accent = QColor("#59c98a") if self.live_matches else QColor("#d1707c")
+
         title = QFont(self.font())
         title.setPointSizeF(max(8.0, min(w, h) * 0.075))
         title.setBold(True)
         p.setFont(title)
-        p.setPen(QPen(QColor("#4fc3f7")))
+        p.setPen(QPen(accent))
         p.drawText(int(x + 8), int(y + h * 0.16), "Camera sees")
 
         s = min(w * 0.78, h * 0.46) / 3.0
         gx = x + (w - 3 * s) / 2.0
         gy = y + h * 0.24
-        if face is None:                       # cube not scanned yet
+        stickers = self.live_face if live else (
+            shown.faces[face] if face else None)
+        if stickers is None:
             p.setPen(QPen(QColor("#8a9099")))
             p.drawText(int(x + 8), int(gy + s), "—")
             return
-        stickers = shown.faces[face]
         for row in range(3):
             for col in range(3):
                 px = gx + col * s
@@ -410,16 +433,20 @@ class CubeViewWidget(QWidget):
                 p.setPen(QPen(QColor("#14161a"), max(1.0, s * 0.06)))
                 p.drawRect(int(px), int(py), int(s), int(s))
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(QColor("#4fc3f7"), 3))
+        p.setPen(QPen(accent, 3))
         p.drawRect(int(gx), int(gy), int(3 * s), int(3 * s))
 
         name = QFont(self.font())
         name.setPointSizeF(max(7.5, min(w, h) * 0.062))
         p.setFont(name)
-        p.setPen(QPen(QColor("#c6cad1")))
-        p.drawText(int(x + 8), int(gy + 3 * s + h * 0.12),
-                   f"{COLOR_NAME[self.camera_colour]} side "
-                   f"— what you look at")
+        if live:
+            p.setPen(QPen(accent))
+            caption = ("✔ matches the plan" if self.live_matches
+                       else "✗ not what I expect yet")
+        else:
+            p.setPen(QPen(QColor("#c6cad1")))
+            caption = f"{COLOR_NAME[self.camera_colour]} side — what you look at"
+        p.drawText(int(x + 8), int(gy + 3 * s + h * 0.12), caption)
 
     def _paint_net(self, p: QPainter, x: int, y: int, w: int, h: int,
                    shown: Cube, spot: str | None) -> None:

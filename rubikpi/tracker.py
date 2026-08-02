@@ -77,6 +77,25 @@ def visible_face(cube: Cube, observed: list[str]) -> str:
     return seen[0] if len(seen) == 1 else ""
 
 
+def read_face(cube: Cube, observed: list[str]) -> tuple[str, int, int]:
+    """Compare what the camera sees with the cube as the app believes it.
+
+    Returns the face being shown, how far round it is turned in view, and
+    how many of the nine stickers agree.  Nine out of nine means the app
+    and the real cube are in step — the confirmation the user wants.
+    """
+    face = visible_face(cube, observed)
+    if not face:
+        return "", 0, 0
+    best_roll, best_score = 0, -1
+    for roll in range(4):
+        predicted = rotate_face(cube.faces[face], roll)
+        score = sum(1 for a, b in zip(predicted, observed) if a == b)
+        if score > best_score:
+            best_roll, best_score = roll, score
+    return face, best_roll, best_score
+
+
 def is_hidden(face: str, move: str) -> bool:
     """Would this move be invisible while looking at *face*?"""
     return bool(move) and move[0] == OPPOSITE.get(face, "")

@@ -2,7 +2,26 @@
 
 All notable changes to RubikPI.
 
-## 0.12.0 — 2026-08-01
+## 0.13.0 — 2026-08-01
+
+Fixes follow-along never firing, and turns the panel into a confirmation.
+
+- **Detection no longer needs a perfectly steady reading.** It waited for
+  the nine stickers to come back *pixel-identical six frames running*;
+  with a real webcam a single borderline sticker flickering means that
+  never happens, so nothing was ever detected and nothing said why. The
+  vote is now taken on the *interpretation* — three frames agreeing on
+  the same move — which shrugs off a wobbling sticker.
+- **The "Camera sees" panel shows the live reading** while following, not
+  the app's belief, with a green border and "✔ matches the plan" when the
+  two agree and a red "✗ not what I expect yet" when they do not. That is
+  the confirmation that you turned the right face, and it evolves as you
+  solve.
+- **It says what is wrong instead of going quiet**: no cube in view, a
+  centre colour that matches no side of your cube, or an unclear change
+  all now produce a message (each said once, not every frame).
+- The cube and the unfolded net update as soon as a move is recognised,
+  which is what was missing while detection never fired.
 
 The move you have to make demonstrates itself, over and over.
 
