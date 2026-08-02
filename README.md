@@ -26,6 +26,13 @@ possibilities* from wherever you currently stand.
   the frame (contour detection), colours are classified in Lab space and
   self-calibrate from your own stickers, and steady readings auto-capture.
   A guided 6-step protocol tells you exactly how to hold the cube.
+- **Solve timer** — starts on your first move, stops when the cube is
+  solved, with the move count beside it.
+- **Fingers are not mistaken for stickers** — skin is warm and washed out
+  where white stickers are neutral, so a finger reads as "hidden" rather
+  than white. Hidden stickers are left out of the matching instead of
+  counted wrong, and a move whose evidence is under your fingers is
+  never assumed done.
 - **Follow me** — during a solve the camera keeps watching one face. The
   centre sticker tells it which side it is looking at, turning that face
   or any neighbour is recognised automatically, and the solution advances

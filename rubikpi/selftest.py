@@ -279,14 +279,36 @@ def main() -> int:
     )
 
     # Reading the face back: 9/9 confirms the app and the cube agree.
-    agree = all(tk.read_face(c, tk.rotate_face(c.faces[f], k)) == (f, k, 9)
+    agree = all(tk.read_face(c, tk.rotate_face(c.faces[f], k)) == (f, k, 9, 9)
                 for f in FACES for k in range(4))
     all_ok &= check("a matching face reads 9 out of 9, at any rotation",
                     agree)
-    _, _, after_turn = tk.read_face(c, tk.rotate_face(c.moved("U").faces[watched],
-                                                      0))
+    _, _, after_turn, _ = tk.read_face(
+        c, tk.rotate_face(c.moved("U").faces[watched], 0))
     all_ok &= check("after a turn the same face no longer reads 9 out of 9",
                     after_turn < 9)
+
+    # Stickers under a finger are unknown, not wrong.
+    covered = tk.rotate_face(c.faces[watched], 0)
+    covered[0] = covered[1] = "X"
+    _, _, score, known = tk.read_face(c, covered)
+    all_ok &= check("hidden stickers are left out, not counted as wrong",
+                    (score, known) == (7, 7))
+    all_ok &= check("a finger alone is never read as a move",
+                    tk.best_match(c, covered, expected="U").move == "")
+    proof = [i for i in range(9)
+             if c.faces[watched][i] != c.moved("U").faces[watched][i]]
+    blind = tk.rotate_face(c.moved("U").faces[watched], 0)
+    for i in proof:
+        blind[i] = "X"
+    hedged = tk.best_match(c, blind, expected="U")
+    all_ok &= check("a move whose evidence is covered is not assumed done",
+                    hedged.move == "" and not hedged.confident)
+    mostly = tk.rotate_face(c.faces[watched], 0)
+    for i in (0, 1, 2, 3):
+        mostly[i] = "X"
+    all_ok &= check("with most of the face covered it gives no opinion",
+                    not tk.best_match(c, mostly).confident)
 
     noisy = tk.rotate_face(c.moved("U").faces[watched], 1)
     noisy[7] = "W" if noisy[7] != "W" else "G"

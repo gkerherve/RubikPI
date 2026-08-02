@@ -67,6 +67,11 @@ BGR = {
 }
 
 
+def chroma(lab: tuple[float, float, float]) -> float:
+    """How colourful a sample is — its distance from neutral grey."""
+    return ((lab[1] - 128.0) ** 2 + (lab[2] - 128.0) ** 2) ** 0.5
+
+
 def classify_lab(lab: tuple[float, float, float],
                  refs: dict[str, tuple[float, float, float]]) -> str:
     """Nearest-reference classification in OpenCV Lab space.
@@ -74,17 +79,39 @@ def classify_lab(lab: tuple[float, float, float],
     Lightness is down-weighted so shadows and lamp brightness matter less
     than the actual chroma of the sticker.  White vs yellow separates on
     the b (blue-yellow) axis, red vs orange on a/b together.
+
+    Returns "X" for anything that is not plausibly a sticker rather than
+    forcing it to the nearest colour.  A finger over a sticker is the
+    case that matters: lit skin lands within ~17 of white, closer than
+    any two sticker colours are to each other, so distance alone would
+    confidently call it white.
+
+    What does separate them is *warm, washed-out* colour.  Skin of every
+    tone sits in the warm quadrant with chroma 12-25, while red and
+    orange keep chroma above 41 even at half light, and white stays
+    neutral (0-2 even in shade).  Green, blue and yellow are not warm at
+    all, so they are never at risk however dim they get.
     """
     L, a, b = lab
     if L < 35:
-        return "X"
+        return "X"                       # too dark to judge
+
+    # The lower edge follows the calibrated white, so a warm-tinted white
+    # sticker under tungsten light is not mistaken for a finger.
+    c = chroma(lab)
+    warm = a > 130.0 and b > 130.0
+    floor = max(chroma(refs["W"]) + 5.0 if "W" in refs else 5.0, 9.0)
+    if warm and floor < c < 33.0:
+        return "X"                       # a finger, a shadow edge, skin
+
     best = None
     letter = "X"
     for name, (rl, ra, rb) in refs.items():
         d = 0.30 * (L - rl) ** 2 + (a - ra) ** 2 + (b - rb) ** 2
         if best is None or d < best:
             best, letter = d, name
-    return letter
+    #: Further from every sticker colour than they are from each other.
+    return letter if best is not None and best < 9000 else "X"
 
 
 class CameraWorker(QThread):

@@ -21,6 +21,11 @@ What one face tells you:
 * **A turn of the opposite face**: nothing changes — genuinely invisible,
   and reported as such rather than guessed at.
 
+Stickers the camera cannot read — a finger resting on the cube, a patch
+of glare — arrive as "X" and are simply left out of the comparison
+rather than counted as wrong.  A move is only credited while enough of
+the face is visible to tell it from the alternatives.
+
 One ambiguity is unavoidable: turning the face you are looking at looks
 exactly like turning the whole cube in your hands.  Passing the move the
 app just asked for as *expected* settles it — if what the camera sees
@@ -38,6 +43,9 @@ from rubikpi.cube import ALL_MOVES, FACES, OPPOSITE, Cube, _FACE_CW
 
 #: Stickers compared per hypothesis: one face.
 CELLS = 9
+
+#: How many of the nine must be readable before anything is decided.
+MIN_KNOWN = 6
 
 #: Human names for the four ways a face can be rotated in view.
 ROLL_NAMES = {0: "", 1: "rolled it clockwise",
@@ -59,15 +67,21 @@ class Match:
     face: str = ""          # the face pointing at the camera
     move: str = ""          # "" when nothing turned
     roll: int = 0           # quarter turns the view is rotated by
-    score: int = 0          # matching stickers out of 9
+    score: int = 0          # matching stickers among the readable ones
+    known: int = 0          # stickers the camera could actually read
     ambiguous: bool = False  # several different moves fit equally well
     options: list[str] = field(default_factory=list)
 
     @property
+    def hidden(self) -> int:
+        """Stickers a finger or glare is covering."""
+        return CELLS - self.known
+
+    @property
     def confident(self) -> bool:
-        """At most one odd sticker, one face identified, one reading."""
-        return bool(self.face) and self.score >= CELLS - 1 \
-            and not self.ambiguous
+        """Enough of the face readable, and one reading that fits it."""
+        return (bool(self.face) and self.known >= MIN_KNOWN
+                and self.score >= self.known - 1 and not self.ambiguous)
 
 
 def visible_face(cube: Cube, observed: list[str]) -> str:
@@ -77,23 +91,36 @@ def visible_face(cube: Cube, observed: list[str]) -> str:
     return seen[0] if len(seen) == 1 else ""
 
 
-def read_face(cube: Cube, observed: list[str]) -> tuple[str, int, int]:
+def agreement(predicted: list[str], observed: list[str]) -> tuple[int, int]:
+    """(matching, readable) — stickers the camera could not read are skipped."""
+    matching = readable = 0
+    for want, seen in zip(predicted, observed):
+        if seen == "X":
+            continue           # hidden by a finger or glare: no opinion
+        readable += 1
+        matching += want == seen
+    return matching, readable
+
+
+def read_face(cube: Cube, observed: list[str]) -> tuple[str, int, int, int]:
     """Compare what the camera sees with the cube as the app believes it.
 
-    Returns the face being shown, how far round it is turned in view, and
-    how many of the nine stickers agree.  Nine out of nine means the app
-    and the real cube are in step — the confirmation the user wants.
+    Returns the face being shown, how far round it is turned in view, how
+    many readable stickers agree, and how many were readable at all.
+    Agreement on everything readable means the app and the real cube are
+    in step — the confirmation the user wants — and hidden stickers count
+    against neither side.
     """
     face = visible_face(cube, observed)
     if not face:
-        return "", 0, 0
-    best_roll, best_score = 0, -1
+        return "", 0, 0, 0
+    best_roll, best_score, best_known = 0, -1, 0
     for roll in range(4):
         predicted = rotate_face(cube.faces[face], roll)
-        score = sum(1 for a, b in zip(predicted, observed) if a == b)
+        score, known = agreement(predicted, observed)
         if score > best_score:
-            best_roll, best_score = roll, score
-    return face, best_roll, best_score
+            best_roll, best_score, best_known = roll, score, known
+    return face, best_roll, best_score, best_known
 
 
 def is_hidden(face: str, move: str) -> bool:
@@ -109,11 +136,15 @@ def best_match(cube: Cube, observed: list[str],
     it as well as anything else, it wins — that is what separates
     "you turned this face" from "you turned the whole cube round".
     """
-    if len(observed) != CELLS or "X" in observed:
+    if len(observed) != CELLS:
         return Match()
     face = visible_face(cube, observed)
     if not face:
         return Match()
+    readable = sum(1 for c in observed if c != "X")
+    if readable < MIN_KNOWN:
+        # Too much of the face is covered to say anything about it.
+        return Match(face=face, known=readable)
 
     best = -1
     fits: list[tuple[str, int]] = []          # (move, roll) scoring best
@@ -121,7 +152,7 @@ def best_match(cube: Cube, observed: list[str],
         probe = cube if not move else cube.moved(move)
         for roll in range(4):
             predicted = rotate_face(probe.faces[face], roll)
-            score = sum(1 for a, b in zip(predicted, observed) if a == b)
+            score, _ = agreement(predicted, observed)
             if score > best:
                 best, fits = score, [(move, roll)]
             elif score == best:
@@ -135,10 +166,27 @@ def best_match(cube: Cube, observed: list[str],
     def pick(move: str) -> Match:
         roll = next(r for m, r in fits if m == move)
         return Match(face=face, move=move, roll=roll, score=best,
-                     options=sorted(moves))
+                     known=readable, options=sorted(moves))
+
+    def picture(move: str) -> list[str]:
+        roll = next(r for m, r in fits if m == move)
+        probe = cube if not move else cube.moved(move)
+        return rotate_face(probe.faces[face], roll)
 
     if expected and expected in moves and not is_hidden(face, expected):
-        return pick(expected)
+        if "" not in moves:
+            return pick(expected)       # something plainly changed
+        # Both fit.  If they would look identical even with nothing
+        # covered, the ambiguity is inherent — turning the face you are
+        # watching looks like turning the whole cube — and the move the
+        # app asked for is the better bet.  If they only agree because a
+        # finger is over the stickers that would tell them apart, say so
+        # instead of guessing.
+        if picture(expected) == picture(""):
+            return pick(expected)
+        result = pick("")
+        result.ambiguous = True
+        return result
     if "" in moves:
         return pick("")
     if len(visible_moves) == 1:

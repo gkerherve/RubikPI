@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import random
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QMainWindow, QPushButton, QSplitter,
@@ -43,6 +43,7 @@ QLabel#instruction { color: #8fd3a8; font-weight: bold; }
 QLabel#hintLabel { color: #8a9099; font-size: 12px; }
 QLabel#nextMove { color: #e8b93c; font-size: 40px; font-weight: bold; }
 QLabel#nextWords { color: #d8dce2; font-size: 14px; }
+QLabel#clock { color: #8fd3a8; font-size: 22px; font-weight: bold; }
 QGroupBox { border: 1px solid #3a3f46; border-radius: 8px; margin-top: 8px;
             padding-top: 8px; }
 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px;
@@ -102,6 +103,14 @@ class MainWindow(QMainWindow):
         self.play_timer = QTimer(self)
         self.play_timer.setInterval(900)
         self.play_timer.timeout.connect(self._play_tick)
+
+        #: Solve clock: starts on the first move, stops when it is solved.
+        self.clock = QElapsedTimer()
+        self.clock_running = False
+        self.clock_held = 0            # milliseconds of a finished solve
+        self.clock_timer = QTimer(self)
+        self.clock_timer.setInterval(100)
+        self.clock_timer.timeout.connect(self._refresh_clock)
 
         self._build_ui()
         self._refresh_title()
@@ -166,6 +175,20 @@ class MainWindow(QMainWindow):
         self.mode_box.currentIndexChanged.connect(self._on_mode_changed)
         mode_row.addWidget(self.mode_box, stretch=1)
         mv.addLayout(mode_row)
+
+        clock_row = QHBoxLayout()
+        self.clock_label = QLabel("0:00.0")
+        self.clock_label.setObjectName("clock")
+        self.clock_label.setToolTip(
+            "Time for this solve — it starts on your first move and stops "
+            "when the cube is solved.")
+        clock_row.addWidget(QLabel("⏱"))
+        clock_row.addWidget(self.clock_label)
+        clock_row.addStretch(1)
+        self.moves_label = QLabel("")
+        self.moves_label.setObjectName("hintLabel")
+        clock_row.addWidget(self.moves_label)
+        mv.addLayout(clock_row)
 
         ctrl = QHBoxLayout()
         self.btn_solve = QPushButton("Solve ▸")
@@ -240,6 +263,46 @@ class MainWindow(QMainWindow):
         self._say(f"Camera on the {cam} side, so you are looking at the "
                   f"{you} side — {right} is on your right.")
         self._follow_match = None  # re-announce the view next frame
+
+    # -- solve clock ----------------------------------------------------------
+
+    def _start_clock(self) -> None:
+        """First move of a solve: start counting."""
+        if self.clock_running:
+            return
+        self.clock_running = True
+        self.clock_held = 0
+        self.clock.restart()
+        self.clock_timer.start()
+        self._refresh_clock()
+
+    def _stop_clock(self) -> None:
+        if not self.clock_running:
+            return
+        self.clock_held = self.clock.elapsed()
+        self.clock_running = False
+        self.clock_timer.stop()
+        self._refresh_clock()
+
+    def _reset_clock(self) -> None:
+        self.clock_running = False
+        self.clock_held = 0
+        self.clock_timer.stop()
+        self._refresh_clock()
+
+    def elapsed_ms(self) -> int:
+        return self.clock.elapsed() if self.clock_running else self.clock_held
+
+    def _refresh_clock(self) -> None:
+        ms = self.elapsed_ms()
+        minutes, rest = divmod(ms, 60000)
+        seconds, tenths = divmod(rest, 1000)
+        self.clock_label.setText(f"{minutes}:{seconds:02d}.{tenths // 100}")
+        if self.solution is not None:
+            total = len(self.solution.moves)
+            self.moves_label.setText(f"move {self.progress} of {total}")
+        else:
+            self.moves_label.setText("")
 
     def _refresh_title(self) -> None:
         mode = self.mode_box.currentText() if hasattr(self, "mode_box") else ""
@@ -322,6 +385,7 @@ class MainWindow(QMainWindow):
             return
         self.solution = solution
         self.progress = 0
+        self._reset_clock()
         stages = ", ".join(f"{s.label} ({len(s.moves)})"
                            for s in solution.stages)
         self._say(f"Solution found: {len(solution.moves)} moves via "
@@ -329,6 +393,7 @@ class MainWindow(QMainWindow):
         self._sync_views()
 
     def _invalidate_solution(self) -> None:
+        self._reset_clock()
         self.play_timer.stop()
         self.btn_play.setText("▶ Play")
         if self.btn_follow.isChecked():
@@ -343,8 +408,11 @@ class MainWindow(QMainWindow):
             return
         move = self.solution.moves[self.progress]
         before = self.cube.copy()
+        self._start_clock()
         self.cube.apply(move)
         self.progress += 1
+        if self.progress >= len(self.solution.moves):
+            self._stop_clock()
         self._sync_views(highlight_move=move)
         self.view.animate_move(before, move)
 
@@ -414,22 +482,31 @@ class MainWindow(QMainWindow):
         if not self.btn_follow.isChecked():
             return
         grid = list(grid)
-        if len(grid) != 9 or "X" in grid:
+        if len(grid) != 9 or all(c == "X" for c in grid):
             self.view.set_live_face(None)
             self._follow_note("Show me one face of the cube, filling the "
                               "guide in the camera view.")
             return
+        # A few unreadable stickers are expected — fingers hold the cube —
+        # so they are passed straight through and treated as unknown.
 
-        face, _, score = read_face(self.cube, grid)
+        face, _, score, known = read_face(self.cube, grid)
         if not face:
             self.view.set_live_face(grid, False)
-            self._follow_note("That centre colour does not match any side of "
-                              "your cube — check the scan, or the lighting.")
+            hidden = sum(1 for c in grid if c == "X")
+            if grid[4] == "X":
+                self._follow_note("Your finger is over the middle sticker — "
+                                  "I need that one to tell which side I am "
+                                  "looking at.")
+            else:
+                self._follow_note("That centre colour does not match any side "
+                                  "of your cube — check the scan, or the "
+                                  f"lighting. ({hidden} stickers hidden)")
             return
 
         # The centre names the face, so the camera knows its own side.
         self._sync_camera_face(face)
-        self.view.set_live_face(grid, score == 9)
+        self.view.set_live_face(grid, known > 0 and score == known)
         if self.solution is None:
             return
 
@@ -439,9 +516,15 @@ class MainWindow(QMainWindow):
         if not match.confident:
             self._pending_move = ""
             self._pending_votes = 0
-            self._follow_note(
-                "Not sure what changed — hold the cube still for a moment, "
-                f"or show me the face you are turning. ({score}/9 known)")
+            if known < 6:
+                self._follow_note(
+                    f"Too much of the face is covered ({9 - known} stickers) "
+                    "— move your fingers off it for a moment.")
+            else:
+                self._follow_note(
+                    "Not sure what changed — your fingers may be over the "
+                    "stickers that would tell me. Move them, or press the "
+                    "right arrow if you have done the move.")
             return
 
         moved_words = describe_change(self._follow_match, match)
@@ -512,10 +595,13 @@ class MainWindow(QMainWindow):
                     if self.solution and self.progress < len(self.solution.moves)
                     else "")
         before = self.cube.copy()
+        self._start_clock()
         self.cube.apply(move)
         if move == expected:
             self.progress += 1
             done = self.progress >= len(self.solution.moves)
+            if done:
+                self._stop_clock()
             self._sync_views(highlight_move=move)
             self.view.animate_move(before, move)
             if done:
@@ -560,6 +646,7 @@ class MainWindow(QMainWindow):
         self.view.set_highlight(face, highlight_move)
         self.view.set_preview_move(self._preview_move_now())
         self.tree_panel.set_state(self.cube, self.solution, self.progress)
+        self._refresh_clock()
         if self.solution is not None:
             self._update_stage_label()
 

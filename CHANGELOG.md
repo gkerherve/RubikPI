@@ -2,7 +2,30 @@
 
 All notable changes to RubikPI.
 
-## 0.13.0 — 2026-08-01
+## 0.14.0 — 2026-08-01
+
+A solve clock, and fingers no longer read as white stickers.
+
+- **Solve timer** in the middle panel: starts on your first move, stops
+  the moment the cube is solved, with "move 7 of 20" beside it.
+- **Fingers are recognised as fingers.** Lit skin sits within ~17 of
+  white in Lab — closer than any two sticker colours are to each other —
+  so a finger over a sticker was confidently read as white. Skin of
+  every tone is *warm and washed out* (chroma 12-25) while white stays
+  neutral (0-2 even in shade) and red and orange keep chroma above 41
+  even at half light; that gap is now used to mark such samples unknown.
+  Green, blue and yellow are not warm at all, so they are never at risk
+  however dim they get, and the white edge follows your calibrated white
+  so a tungsten-tinted cube still reads correctly.
+- **Unknown stickers are left out rather than counted wrong.** The
+  tracker scores only what it can read, needs at least 6 of the 9, and
+  will not credit a move whose evidence is under your fingers — it says
+  so instead of assuming. A finger alone can never be read as a move.
+- Hidden stickers appear as grey hatching in the "Camera sees" panel,
+  captioned "(2 hidden)", so it is obvious what the camera cannot see.
+- Fixed: any frame containing an unreadable sticker was being discarded
+  outright, which would have thrown away most real frames now that
+  fingers are detected.
 
 Fixes follow-along never firing, and turns the panel into a confirmation.
 

@@ -428,10 +428,21 @@ class CubeViewWidget(QWidget):
             for col in range(3):
                 px = gx + col * s
                 py = gy + row * s
-                p.setBrush(STICKER_QCOLOR.get(stickers[row * 3 + col],
-                                              STICKER_QCOLOR["X"]))
+                letter = stickers[row * 3 + col]
+                p.setBrush(STICKER_QCOLOR.get(letter, STICKER_QCOLOR["X"]))
                 p.setPen(QPen(QColor("#14161a"), max(1.0, s * 0.06)))
                 p.drawRect(int(px), int(py), int(s), int(s))
+                if letter == "X":
+                    # Covered by a finger or lost to glare: shown as hatched
+                    # rather than guessed at, so it reads as "I cannot see
+                    # this one" instead of a wrong colour.
+                    p.setPen(QPen(QColor("#8a9099"), max(1.0, s * 0.08)))
+                    for k in range(1, 4):
+                        off = k * s / 4.0
+                        p.drawLine(int(px), int(py + off),
+                                   int(px + off), int(py))
+                        p.drawLine(int(px + s), int(py + s - off),
+                                   int(px + s - off), int(py + s))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(accent, 3))
         p.drawRect(int(gx), int(gy), int(3 * s), int(3 * s))
@@ -441,8 +452,11 @@ class CubeViewWidget(QWidget):
         p.setFont(name)
         if live:
             p.setPen(QPen(accent))
+            covered = sum(1 for c in self.live_face if c == "X")
             caption = ("✔ matches the plan" if self.live_matches
                        else "✗ not what I expect yet")
+            if covered:
+                caption += f"  ({covered} hidden)"
         else:
             p.setPen(QPen(QColor("#c6cad1")))
             caption = f"{COLOR_NAME[self.camera_colour]} side — what you look at"
